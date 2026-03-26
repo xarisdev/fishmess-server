@@ -48,6 +48,14 @@ manager = ConnectionManager()
 class MessageRequest(BaseModel):
     message: str
 
+@app.get("/")
+def root():
+    return {"key": "test-key"}
+
+@app.get("/{test_key}")
+def test_get(test_key: int, q: str = None):
+    return {"key": test_key, "q": q}
+
 @app.post("/send")
 async def send_message_via_http(msg: MessageRequest):
     await manager.broadcast(msg.message)
