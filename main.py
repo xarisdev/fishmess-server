@@ -3,7 +3,7 @@ from fastapi import FastAPI
 
 app = FastAPI(tittle='fishmess-server')
 
-@app.get("/{access_type}&{token}")
+@app.get("/")
 def auth_and_refresh(access_type: str, token: str): 
     if access_type == "auth":
         data = {"isConnected": True, "refresh_token": token+"_refr"}
