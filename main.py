@@ -3,10 +3,22 @@ from fastapi import FastAPI
 
 app = FastAPI(tittle='fishmess-server')
 
-@app.get("/")
-def root():
-    return {"key": "test-key"}
+@app.get("/{access_type}&{token}")
+def auth_and_refresh(access_type: str, token: str): 
+    if access_type == "auth":
+        data = {"isConnected": True, "refresh_token": token+"_refr"}
+    elif access_type == "refr":
+        data = {"chat_list": {}, "user_info": {}}
+    
+    return data
 
-@app.get("/{test_key}")
-def test_get(test_key: int, q: str = None):
-    return {"key": test_key, "q": q}
+# Авторизация
+# access_type: 'token', 'refresh_token'
+# GET /localhost:port/?token={token}
+# RESPONSE
+# data = {"isConnected": bool, "refresh_token": str}
+#
+# Обновление (подписка)
+# GET /localhost:port/?&refresh_token={refresh_token}
+# RESPONSE
+# data = {"chat_list": dict, "user_info": dict}
