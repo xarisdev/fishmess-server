@@ -13,12 +13,12 @@ def auth_and_refresh(access_type: str, token: str):
     return data
 
 # Авторизация
-# access_type: 'token', 'refresh_token'
-# GET /localhost:port/?token={token}
+# access_type: 'auth', 'refr'
+# GET /localhost:port/?access_type=str&token=token
 # RESPONSE
 # data = {"isConnected": bool, "refresh_token": str}
 #
 # Обновление (подписка)
-# GET /localhost:port/?&refresh_token={refresh_token}
+# GET /localhost:port/?access_type=str&refresh_token=refresh_token
 # RESPONSE
 # data = {"chat_list": dict, "user_info": dict}
