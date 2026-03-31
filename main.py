@@ -3,6 +3,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from models import AuthRequest, AuthResponse, RefreshRequest, ChatModel, UserModel
 
+from db import get_user_by_id, get_all_users
+
 # Для запуска сервера: uvicorn main:app --reload --port 8000
 app = FastAPI(tittle='fishmess-server')
 
@@ -18,7 +20,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid token")
     user_id = payload.get("sub")
-    user = await get_user_by_id(user_id) # Из БД
+    user = await get_user_by_id([user_id]) # Из БД
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
