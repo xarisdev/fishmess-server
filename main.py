@@ -1,78 +1,46 @@
-from fastapi import FastAPI, HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import FastAPI, HTTPException
+# BaseModel
+from models import AuthRequest, AuthResponse
 
-from models import AuthRequest, AuthResponse, RefreshRequest, ChatModel, UserModel
+from db import get_hash_from_user, save_refresh_token
+from specials import generate_refresh_token
 
-from db import get_user_by_id, get_all_users
+app = FastAPI(title='fishmess-server') # Для запуска сервера: uvicorn main:app --reload --port 8000
+active_connections = {} # Websocket (user_id -> Websocket)
 
-# Для запуска сервера: uvicorn main:app --reload --port 8000
-app = FastAPI(tittle='fishmess-server')
+# Custom exception (Database)
+from specials import *
+@app.exception_handler(ConflictError)
+async def conflict_exception_handler(request, exc: ConflictError): raise HTTPException(status_code=409, detail=str(exc))
+@app.exception_handler(BadRequestError)
+async def bad_request_handler(request, exc: BadRequestError): raise HTTPException(status_code=400, detail=str(exc))
+@app.exception_handler(DatabaseError)
+async def db_error_handler(request, exc: DatabaseError): raise HTTPException(status_code=503, detail=str(exc))
 
-sessions = {}
-refresh_tokens = {}
+# Token security
+from passlib.context import CryptContext
 
-security = HTTPBearer()
-
-# get user from db
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    payload = decode_token(token) # Проверка токена (внешка)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    user_id = payload.get("sub")
-    user = await get_user_by_id([user_id]) # Из БД
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def hash_api_key(plain_key: str) -> str: return pwd_context.hash(plain_key)
+def verify_api_key(plain_key: str, hashed_key: str) -> bool: return pwd_context.verify(plain_key, hashed_key)
 
 @app.post("/auth", response_model=AuthResponse)
-async def auth(requset: AuthRequest): # Authorization
-    access_key = requset.access_key # Private entry key
+async def auth(request: AuthRequest): # Authorization
+    user_tag = request.user_tag
+    access_key = request.access_key
+    # Валидация данных
+    hashed_key = get_hash_from_user(user_tag)
+    isVerified = verify_api_key(access_key, hashed_key)
+    if not isVerified:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
     
-    #
-    # generate access token
-    #
-
-    #
-    # generate refresh token
-    #
-
-    data = { # API example
-        "access_token": "",
-        "refresh_token": "",
-        "token_type": "bearer"
-    }
-
-    return data
-
-@app.post("/auth/refresh", response_model=AuthResponse)
-async def auth_refresh(request: RefreshRequest):
-    refresh_token = request.refresh_token
-
-    #
-    # Валидация
-    #
-
-    #
-    # Генерация access токена
-    #
-
-    data = {
-        "status": "",
+    refresh_token = generate_refresh_token()
+    save_refresh_token(user_tag, refresh_token)
+    response = {
+        "status": "success",
         "data": {
-            "access_token": ""
+            "refresh_token": refresh_token,
+            "token_type": "bearer"
         }
     }
-
-"""
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    session = sessions.get(token)
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid access token",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    
-    return {}"""
+    return response

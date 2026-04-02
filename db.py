@@ -3,7 +3,15 @@ from dotenv import load_dotenv
 
 import psycopg2 as pc2
 
+from specials import handle_db_errors
+"""
+from passlib.context import CryptContext
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def hash_api_key(plain_key: str) -> str: return pwd_context.hash(plain_key)
+def verify_api_key(plain_key: str, hashed_key: str) -> bool: return pwd_context.verify(plain_key, hashed_key)
+"""
 load_dotenv('.env')
+#load_dotenv('access.env')
 
 DATABASE_NAME=getenv('DATABASE_NAME')
 DATABASE_HOST=getenv('DATABASE_HOST')
@@ -21,21 +29,17 @@ def get_connection():
     )
     conn.autocommit = True
     return conn
-async def get_async_connection():
-    conn = await pc2.connect(
-        dbname=DATABASE_NAME,
-        host=DATABASE_HOST,
-        user=DATABASE_USER,
-        password=DATABASE_PASS,
-        port=DATABASE_PORT,
-        async_=True
-    )
-    conn.autocommit = True
-    return conn
 
 def create_tables():
     conn = get_connection()
 
+    refresh_tokens = "CREATE TABLE IF NOT EXISTS refresh_tokens (" \
+        "user_tag        VARCHAR(32) PRIMARY KEY REFERENCES users(tag) ON DELETE CASCADE," \
+        "access_token    VARCHAR(128) NOT NULL UNIQUE," \
+        "refresh_token   VARCHAR(128) NULL UNIQUE," \
+        "created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP," \
+        "updated_at      TIMESTAMP" \
+    ")"
     users = "CREATE TABLE IF NOT EXISTS users (" \
         "id              BIGSERIAL PRIMARY KEY," \
         "tag             VARCHAR(32) UNIQUE NOT NULL," \
@@ -97,9 +101,10 @@ def create_tables():
         with conn.cursor() as cursor:
             cursor.execute(media)
             cursor.execute(users)
+            cursor.execute(refresh_tokens) # access/refresh tokens reference users table
             cursor.execute(chats)
             cursor.execute(messages)
-            cursor.execute(
+            cursor.execute( # need messages table for last_message_id reference
                 "ALTER TABLE chats ADD COLUMN IF NOT EXISTS" \
                 " last_message_id BIGINT NULL REFERENCES messages(id) ON DELETE SET NULL"
             )
@@ -118,5 +123,67 @@ def create_tables():
     finally:
         conn.close() # autocommit
 
+@handle_db_errors
+def create_user(tag: str, name: str, avatar_id: int = None, hashed_key: str = None) -> int:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO users (tag, name, avatar_id) VALUES (%s, %s, %s)" \
+                "RETURNING id",
+                (tag, name, avatar_id)
+            )
+            user_id = cursor.fetchone()[0]
+            cursor.execute(
+                "INSERT INTO refresh_tokens (user_tag, access_token) VALUES (%s, %s) ",
+                (tag, hashed_key))
+            conn.commit()
+            return user_id
+    finally:
+        conn.close()
+
+@handle_db_errors
+def get_hash_from_user(user_tag: str) -> str:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT access_token FROM refresh_tokens WHERE user_tag = %s",
+                (user_tag,)
+            )
+            hash_api_key = cursor.fetchone()[0]
+            return hash_api_key
+    finally:
+        conn.close()
+
+@handle_db_errors
+def save_refresh_token(user_tag: str, refresh_token: str):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE refresh_tokens SET refresh_token = %s, updated_at = CURRENT_TIMESTAMP WHERE user_tag = %s",
+                (refresh_token, user_tag)
+            )
+            conn.commit()
+    finally:
+        conn.close()
+
 if __name__ == "__main__":
+    """
+    def first_init():
+        users = ["kapusta", "yxa"]
+        for u in users:
+            plain_key = getenv(f'{u}_TOKEN')
+            hashed_key = hash_api_key(plain_key)
+
+            print(verify_api_key(plain_key, hashed_key)) # Test
+
+            tag = getenv(f'{u}_TAG')
+            name = getenv(f'{u}_NAME')
+
+            create_user(tag, name, hashed_key=hashed_key)
+    """
+    
     create_tables()
+    #first_init()

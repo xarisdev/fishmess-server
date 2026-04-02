@@ -1,4 +1,6 @@
 fastapi
 uvicorn
 dotenv
-jose
+passlib
+bcrypt
+python-jose==3.5.0
