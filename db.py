@@ -20,45 +20,103 @@ def get_connection():
         port=DATABASE_PORT
     )
     conn.autocommit = True
-
+    return conn
+async def get_async_connection():
+    conn = await pc2.connect(
+        dbname=DATABASE_NAME,
+        host=DATABASE_HOST,
+        user=DATABASE_USER,
+        password=DATABASE_PASS,
+        port=DATABASE_PORT,
+        async_=True
+    )
+    conn.autocommit = True
     return conn
 
-def create_table_users():
+def create_tables():
     conn = get_connection()
-    
-    with conn.cursor() as cursor:
-        cursor.execute("CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username VARCHAR(50), status VARCHAR(10))")
 
-    conn.close()
+    users = "CREATE TABLE IF NOT EXISTS users (" \
+        "id              BIGSERIAL PRIMARY KEY," \
+        "tag             VARCHAR(32) UNIQUE NOT NULL," \
+        "name            VARCHAR(128) NOT NULL," \
+        "avatar_id       BIGINT NULL REFERENCES media(id) ON DELETE SET NULL," \
+        "created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP," \
+        "updated_at      TIMESTAMP" \
+    ")"
+    media = "CREATE TABLE IF NOT EXISTS media (" \
+        "id              BIGSERIAL PRIMARY KEY," \
+        "type            VARCHAR(20) NOT NULL," \
+        "url             TEXT NOT NULL," \
+        "size            BIGINT," \
+        "mime_type       VARCHAR(100)," \
+        "width           INT," \
+        "height          INT," \
+        "duration        INT," \
+        "created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP" \
+    ")"
+    chats = "CREATE TABLE IF NOT EXISTS chats (" \
+        "id              BIGSERIAL PRIMARY KEY," \
+        "type            VARCHAR(20) NOT NULL," \
+        "name            VARCHAR(128) NULL," \
+        "created_by      BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE," \
+        "created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP," \
+        "updated_at      TIMESTAMP" \
+    ")"
+    chat_members = "CREATE TABLE IF NOT EXISTS chat_members (" \
+        "chat_id         BIGINT NOT NULL REFERENCES chats(id) ON DELETE CASCADE," \
+        "user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE," \
+        "joined_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP," \
+        "left_at         TIMESTAMP NULL," \
+        "PRIMARY KEY (chat_id, user_id)" \
+    ")"
+    messages = "CREATE TABLE IF NOT EXISTS messages (" \
+        "id BIGSERIAL    PRIMARY KEY," \
+        "chat_id         BIGINT NOT NULL REFERENCES chats(id) ON DELETE CASCADE," \
+        "sender_id       BIGINT NOT NULL REFERENCES users(id) ON DELETE SET NULL," \
+        "reply_to_id     BIGINT NULL REFERENCES messages(id) ON DELETE CASCADE," \
+        "text            TEXT NULL," \
+        "is_deleted      BOOLEAN DEFAULT FALSE," \
+        "created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP," \
+        "updated_at      TIMESTAMP NULL," \
+        "deleted_at      TIMESTAMP NULL" \
+    ")"
+    messages_media = "CREATE TABLE IF NOT EXISTS message_media (" \
+        "message_id      BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE," \
+        "media_id        BIGINT NOT NULL REFERENCES media(id) ON DELETE CASCADE," \
+        "PRIMARY KEY (message_id, media_id)" \
+    ")"
+    messages_read = "CREATE TABLE IF NOT EXISTS message_reads (" \
+        "message_id      BIGINT NOT NULL REFERENCES messages(id) ON DELETE CASCADE," \
+        "user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE," \
+        "read_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP," \
+        "PRIMARY KEY (message_id, user_id)" \
+    ")"
 
-def create_new_user(user_id: int, username: str, status: str = "offline"):
-    data = (user_id, username[:50], status)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(media)
+            cursor.execute(users)
+            cursor.execute(chats)
+            cursor.execute(messages)
+            cursor.execute(
+                "ALTER TABLE chats ADD COLUMN IF NOT EXISTS" \
+                " last_message_id BIGINT NULL REFERENCES messages(id) ON DELETE SET NULL"
+            )
+            cursor.execute(chat_members)
+            cursor.execute(messages_media)
+            cursor.execute(messages_read)
+            # index
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_members_user_id ON chat_members(user_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_message_reads_user ON message_reads(user_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_chats_last_message_id ON chats(last_message_id)")
+    except Exception as exc:
+        print(exc)
+        conn.rollback()
+    finally:
+        conn.close() # autocommit
 
-    conn = get_connection()
-    with conn.cursor() as cursor:
-        cursor.execute("INSERT INTO users (id, username, status) VALUES (%s, %s, %s)", data)
-
-    conn.close()
-
-def get_all_users() -> list[dict]:
-    conn = get_connection()
-    with conn.cursor() as cursor:
-        cursor.execute("SELECT * FROM users")
-        cdata = cursor.fetchall()
-    conn.close()
-
-    data = [{"id": u[0], "username": u[1], "status": u[2]} for u in cdata] # API format `list[dict]`
-    return data
-
-def get_user_by_id(ids: list[int]) -> list[dict]:
-    if not ids: return
-    placeholders = ', '.join(['%s'] * len(ids))
-    
-    conn = get_connection()
-    with conn.cursor() as cursor:
-        cursor.execute(f"SELECT * FROM users WHERE id IN ({placeholders})", ids)
-        cdata = cursor.fetchall()
-    conn.close()
-
-    data = [{"id": u[0], "username": u[1], "status": u[2]} for u in cdata] # API format `list[dict]`
-    return data
+if __name__ == "__main__":
+    create_tables()
