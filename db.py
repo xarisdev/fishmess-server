@@ -36,13 +36,14 @@ def create_tables():
     refresh_tokens = "CREATE TABLE IF NOT EXISTS refresh_tokens (" \
         "user_tag        VARCHAR(32) PRIMARY KEY REFERENCES users(tag) ON DELETE CASCADE," \
         "access_token    VARCHAR(128) NOT NULL UNIQUE," \
-        "refresh_token   VARCHAR(128) NULL UNIQUE," \
+        "refresh_token   VARCHAR(128) PRIMARY KEY NULL UNIQUE," \
         "created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP," \
-        "updated_at      TIMESTAMP" \
+        "updated_at      TIMESTAMP," \
+        "expiread_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP + INTERVAL '7 days'" \
     ")"
     users = "CREATE TABLE IF NOT EXISTS users (" \
         "id              BIGSERIAL PRIMARY KEY," \
-        "tag             VARCHAR(32) UNIQUE NOT NULL," \
+        "tag             VARCHAR(32) PRIMARY KEY NOT NULL," \
         "name            VARCHAR(128) NOT NULL," \
         "avatar_id       BIGINT NULL REFERENCES media(id) ON DELETE SET NULL," \
         "created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP," \
@@ -123,7 +124,7 @@ def create_tables():
     finally:
         conn.close() # autocommit
 
-@handle_db_errors
+@handle_db_errors # САМОСТОЯТЕЛЬНАЯ ФУНКЦИЯ
 def create_user(tag: str, name: str, avatar_id: int = None, hashed_key: str = None) -> int:
     conn = get_connection()
     try:
@@ -142,30 +143,61 @@ def create_user(tag: str, name: str, avatar_id: int = None, hashed_key: str = No
     finally:
         conn.close()
 
-@handle_db_errors
-def get_hash_from_user(user_tag: str) -> str:
+@handle_db_errors # Получение хэша access_token по имени пользователя
+def get_hash_ac_from_user(user_tag: str) -> str:
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            cursor.execute(
-                "SELECT access_token FROM refresh_tokens WHERE user_tag = %s",
-                (user_tag,)
-            )
+            cursor.execute("SELECT access_token FROM refresh_tokens WHERE user_tag = %s", (user_tag,))
             hash_api_key = cursor.fetchone()[0]
+
             return hash_api_key
     finally:
         conn.close()
 
-@handle_db_errors
-def save_refresh_token(user_tag: str, refresh_token: str):
+@handle_db_errors # Сохранение нового хэша refresh_token
+def save_refresh_token(user_tag: str, hashed_refresh_token: str):
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute(
-                "UPDATE refresh_tokens SET refresh_token = %s, updated_at = CURRENT_TIMESTAMP WHERE user_tag = %s",
-                (refresh_token, user_tag)
+                "UPDATE refresh_tokens SET (refresh_token, expired_at, updated_at) " \
+                "VALUES (%s, CURRENT_TIMESTAMP + INTERVAL '7 days', CURRENT_TIMESTAMP) " \
+                "WHERE user_tag = %s",
+                (hashed_refresh_token, user_tag)
             )
             conn.commit()
+    finally:
+        conn.close()
+
+@handle_db_errors # Получение данных о refresh_token по его хэшу
+def get_refresh_data_from_user(refresh_token_hash: str) -> dict:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT updated_at, expired_at, user_tag FROM refresh_tokens WHERE refresh_token = %s",
+                (refresh_token_hash,)
+            )
+            fetch_data = cursor.fetchone()
+            data = {"updated_at": fetch_data[0], "expired_at": fetch_data[1], "user_tag": fetch_data[2]}
+
+            return data
+    finally:
+        conn.close()
+
+@handle_db_errors
+def get_user_data_by_tag(user_tag: str) -> dict:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM users WHERE user_tag = %s", (user_tag,))
+            fetch_data = cursor.fetchone()[0]
+
+            keys_sample = ['id', 'name', 'user_tag', 'avatar_id', 'created_at', 'updated_at']
+            user_data = {k: v for k, v in zip(keys_sample, fetch_data)}
+
+            return user_data
     finally:
         conn.close()
 
