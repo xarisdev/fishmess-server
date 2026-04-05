@@ -4,3 +4,4 @@ dotenv
 passlib
 bcrypt
 python-jose==3.5.0
+psycopg2
