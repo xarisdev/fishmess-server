@@ -1,3 +1,4 @@
+from typing import Any
 from pydantic import BaseModel
 
 class AuthRequest(BaseModel):
@@ -18,5 +19,5 @@ class User(BaseModel):
     name: str
     user_tag: str
     avatar_id: int
-    created_at: any
-    updated_at: any
+    created_at: Any
+    updated_at: Any
