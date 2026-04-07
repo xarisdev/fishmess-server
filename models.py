@@ -1,23 +1,19 @@
-from typing import Any
 from pydantic import BaseModel
+from datetime import datetime
 
-class AuthRequest(BaseModel):
-    user_tag: str
+# /auth <-
+class AuthHeaders(BaseModel):
+    client_id: str
     access_token: str
-
+# /auth | (/auth/refresh) ->
 class AuthResponse(BaseModel):
     status: str
     data: dict
-
-class ChatCreateRequest(BaseModel):
-    type: str
-    participants: list[int]
-    name: str | None = None
-
-class User(BaseModel):
-    id: int
-    name: str
-    user_tag: str
-    avatar_id: int
-    created_at: Any
-    updated_at: Any
+# /refresh <-
+class RefreshHeaders(BaseModel):
+    client_id: str
+    refresh_token: str
+# /refresh <-
+class RefreshRequest(BaseModel):
+    created_at: datetime
+    token_type: str

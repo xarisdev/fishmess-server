@@ -38,8 +38,7 @@ def handle_db_errors(func):
 
 def generate_refresh_token() -> str:
     token = token_urlsafe(32)
-    hash_token = hash_api_key(token)
-    return hash_token
+    return token
 
 def match_timestamp(timestamp: datetime, expired_after: timedelta) -> bool:
     return datetime.now() - timestamp < expired_after
