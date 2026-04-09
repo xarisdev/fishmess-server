@@ -9,8 +9,6 @@ from exceptions import *
 
 from passlib.context import CryptContext
 
-from models import User
-
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
@@ -42,7 +40,3 @@ def generate_refresh_token() -> str:
 
 def match_timestamp(timestamp: datetime, expired_after: timedelta) -> bool:
     return datetime.now() - timestamp < expired_after
-
-def construct_user(user_data: dict) -> User:
-    user = User(**user_data)
-    return user
