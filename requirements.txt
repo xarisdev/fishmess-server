@@ -2,6 +2,6 @@ fastapi
 uvicorn
 dotenv
 passlib
-bcrypt==4.3.0
+bcrypt==4.0.1
 python-jose==3.5.0
 psycopg2
