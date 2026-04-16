@@ -1,114 +1,71 @@
 import db
-import specials as sp
+import web_models as web_md
 
-from models import AuthHeaders, AuthResponse, RefreshHeaders, RefreshRequest
+from specials import HashManager
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 
 app = FastAPI(title='fishmess-server') # Для запуска сервера: uvicorn main:app --reload --port 8000
-active_connections = {} # Websocket (user_id -> Websocket)
+#active_connections = {} # Websocket (user_id -> Websocket)
 
-from specials import *
-@app.exception_handler(ConflictError)
-async def conflict_exception_handler(r, e: ConflictError): raise HTTPException(status_code=409, detail=str(e))
-@app.exception_handler(BadRequestError)
-async def bad_request_handler(r, e: BadRequestError): raise HTTPException(status_code=400, detail=str(e))
-@app.exception_handler(DatabaseError)
-async def db_error_handler(r, e: DatabaseError): raise HTTPException(status_code=503, detail=str(e))
+#from fastapi.security import HTTPBearer
+#security = HTTPBearer()
 
-from fastapi.security import HTTPBearer
-security = HTTPBearer()
+temporary_access_tokens = {} # access_token: login
 
-# POST /auth
-# Верификация access_token и получение хранимого хэша
-def verify_access_token(client_id: str, access_token: str):
-    hashed_access_token = db.get_hashed_access_token(client_id)
-    isVerified = sp.verify_api_key(access_token, hashed_access_token)
-    if not isVerified:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    return hashed_access_token
-# Получение данных из заголовка
-def get_auth_data(credentials: HTTPBearer = Depends(security)) -> AuthHeaders:
-    crd = credentials.credentials
-    crd = crd.split()[-1].split(":")
-    
-    if not crd: return print(crd)
-    
-    headers = AuthHeaders(client_id=crd[0], access_token=crd[1])
-    return headers
-#
-@app.post("/auth", response_model=AuthResponse)
-async def auth(headers: AuthHeaders = Depends(get_auth_data)): # Authorization
-    client_id = headers.client_id
-    access_token = headers.access_token
-    # Хранимый хэш access_token
-    hashed_access_token = verify_access_token(client_id, access_token)
-    # Новый refresh_token
-    refresh_token = sp.generate_refresh_token()
-    hashed_refresh_token = hash_api_key(refresh_token)
-    # Обновление таблиц с токенами
-    created_at = db.auth_set_refresh_token(client_id, hashed_access_token, hashed_refresh_token)
-    
+@app.post("/auth/login", response_model=web_md.LoginResponse)
+async def login(request: web_md.LoginRequest):
+    login = request.login
+    password = request.password
+    # Верификация пользователя
+    user = db.verify_user(login, password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid login or password")
+    # Постоянный токен доступа
+    access_token = HashManager.generate_token()
+    temporary_access_tokens[access_token] = login
+    # Ответ 200
     response = {
-        "status": "success",
-        "data": {
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
-            "created_at": created_at
-        }
+        "access_token": access_token,
+        "user": user
     }
 
     return response
-# /---/
 
-# POST /auth/refresh
-# Верификация refresh_token
-def verify_refresh_token(client_id: str, refresh_token: str):
-    hashed_refresh_token = db.get_hashed_refresh_token(client_id)
-    isVerified = sp.verify_api_key(refresh_token, hashed_refresh_token[0])
-    if not isVerified:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    return hashed_refresh_token
-# Получение данных из заголовка
-def get_refresh_data(credentials: HTTPBearer = Depends(security)) -> RefreshHeaders:
-    crd = credentials.credentials
-    crd = crd.split()[-1].split(":")
+@app.post("/auth/reg")
+async def registration(request):
+    pass
 
-    if not crd: return print(crd)
+def extract_access_token(request: Request) -> str | None:
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        raise HTTPException(status_code=401, detail="Authorization header missing or invalid")
+    access_token = auth_header.split(' ')[-1]
+    return access_token
 
-    headers = RefreshHeaders(client_id=crd[0], refresh_token=crd[1])
-    return headers
-#
-@app.post("/auth/refresh", response_model=AuthResponse)
-async def refresh(request: RefreshRequest, headers: RefreshHeaders = Depends(get_refresh_data)):
-    created_at = request.created_at
-    token_type = request.token_type
-
-    client_id     = headers.client_id
-    refresh_token = headers.refresh_token
-
-    data = verify_refresh_token(client_id, refresh_token)
-    hashed_refresh_token            = data[0]
-    hashed_refresh_token_created_at = data[1]
-
-    if created_at != hashed_refresh_token_created_at:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    if not sp.match_timestamp(hashed_refresh_token_created_at, timedelta(days=7)):
-        raise HTTPException(status_code=401, detail="Token expired")
+@app.get("/users/me", response_model=web_md.UserResponse)
+async def get_current_user(request: Request):
+    access_token = extract_access_token(request)
+    login = temporary_access_tokens.get(access_token)
+    if not login:
+        raise HTTPException(status_code=401, detail="Invalid access token")
     
-    new_refresh_token = sp.generate_refresh_token()
-    hashed_new_refresh_token = hash_api_key(new_refresh_token)
-
-    created_at = db.refresh_set_refresh_token(client_id, hashed_new_refresh_token)
-
-    response = {
-        "status": "success",
-        "data": {
-            "refresh_token": new_refresh_token,
-            "token_type": "bearer",
-            "created_at": created_at
-        }
-    }
-
+    user = db.get_user_by_login(login)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    response = {"data": user}
     return response
-# /---/
+
+@app.get("/users/{user_id}", response_model=web_md.UserResponse)
+async def get_user_by_id(user_id: int, request: Request):
+    access_token = extract_access_token(request)
+    if not access_token or access_token not in temporary_access_tokens:
+        raise HTTPException(status_code=401, detail="Invalid access token")
+    
+    user = db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    response = {"data": user}
+    return response
