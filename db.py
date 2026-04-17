@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from specials import HashManager
 
-from db_models import UserModel
+from db_models import UserModel, ChatModel
 
 load_dotenv('.env')
 
@@ -62,6 +62,51 @@ def get_user_by_id(user_id: int) -> UserModel | None:
 
 
 
+def get_chats_by_user_id(user_id: int) -> list[ChatModel]:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                WITH user_chats AS (
+                    SELECT id, avatar_id, name, first_user_id, second_user_id
+                    FROM chats
+                    WHERE first_user_id = %s OR second_user_id = %s
+                )
+                SELECT
+                    chat.id,
+                    chat.avatar_id,
+                    chat.name,
+                    chat.first_user_id,
+                    chat.second_user_id,
+                    (SELECT text FROM messages WHERE chat_id = chat.id ORDER BY id DESC LIMIT 1) AS last_message
+                FROM user_chats chat
+            """, (user_id, user_id)
+            )
+            rows = cursor.fetchall()
+            models = [
+                ChatModel(
+                    id              = row[0],
+                    avatar_id       = row[1],
+                    name            = row[2],
+                    first_user_id   = row[3],
+                    second_user_id  = row[4],
+                    last_msg_text   = row[5]
+                ) for row in rows
+            ]
+            return models
+    finally:
+        conn.close()
+
+
+
+
+
+
+
+
+
+
+
 # Верификация пользователя по логину и паролю
 def verify_user(login: str, password: str) -> UserModel | None:
     conn = get_connection()
@@ -77,24 +122,42 @@ def verify_user(login: str, password: str) -> UserModel | None:
 
 def _create_tables():
     users = "CREATE TABLE IF NOT EXISTS users (" \
-        "id SERIAL PRIMARY KEY," \
-        "username TEXT NOT NULL," \
-        "login TEXT NOT NULL UNIQUE," \
-        "password_hash TEXT NOT NULL," \
-        "avatar_id INT REFERENCES media(id)," \
-        "status TEXT DEFAULT 'offline'" \
+        "id             SERIAL  PRIMARY KEY," \
+        "username       TEXT    NOT NULL," \
+        "login          TEXT    NOT NULL UNIQUE," \
+        "password_hash  TEXT    NOT NULL," \
+        "avatar_id      INT     REFERENCES media(id)," \
+        "status         TEXT    DEFAULT 'offline'" \
     ")"
     media = "CREATE TABLE IF NOT EXISTS media (" \
-        "id SERIAL PRIMARY KEY," \
-        "filename text NOT NULL," \
-        "url TEXT NOT NULL" \
+        "id             SERIAL  PRIMARY KEY," \
+        "filename       TEXT    NOT NULL," \
+        "url            TEXT    NOT NULL" \
     ")"
+    chats = "CREATE TABLE IF NOT EXISTS chats (" \
+        "id             SERIAL  PRIMARY KEY," \
+        "avatar_id      INT     REFERENCES media(id)," \
+        "name           TEXT    NOT NULL," \
+        "first_user_id  INT     REFERENCES users(id)," \
+        "second_user_id INT     REFERENCES users(id)" \
+    ")"
+    messages = "CREATE TABLE IF NOT EXISTS messages (" \
+        "id             SERIAL  PRIMARY KEY," \
+        "text           TEXT    NOT NULL," \
+        "chat_id        INT     REFERENCES chats(id)," \
+        "owner_id       INT     REFERENCES users(id)" \
+    ")"
+    chats_last_message_column = "ALTER TABLE chats ADD COLUMN IF NOT EXISTS" \
+        "last_message_id INT REFERENCES messages(id) ON DELETE SET NULL"
 
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute(media)
             cursor.execute(users)
+            cursor.execute(chats)
+            cursor.execute(messages)
+            cursor.execute(chats_last_message_column)
             conn.commit()
     finally:
         conn.close()

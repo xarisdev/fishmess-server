@@ -8,9 +8,6 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 app = FastAPI(title='fishmess-server') # Для запуска сервера: uvicorn main:app --reload --port 8000
 #active_connections = {} # Websocket (user_id -> Websocket)
 
-#from fastapi.security import HTTPBearer
-#security = HTTPBearer()
-
 temporary_access_tokens = {} # access_token: login
 
 @app.post("/auth/login", response_model=web_md.LoginResponse)
@@ -25,16 +22,8 @@ async def login(request: web_md.LoginRequest):
     access_token = HashManager.generate_token()
     temporary_access_tokens[access_token] = login
     # Ответ 200
-    response = {
-        "access_token": access_token,
-        "user": user
-    }
-
+    response = {"access_token": access_token}
     return response
-
-@app.post("/auth/reg")
-async def registration(request):
-    pass
 
 def extract_access_token(request: Request) -> str | None:
     auth_header = request.headers.get('Authorization')
@@ -43,12 +32,16 @@ def extract_access_token(request: Request) -> str | None:
     access_token = auth_header.split(' ')[-1]
     return access_token
 
-@app.get("/users/me", response_model=web_md.UserResponse)
-async def get_current_user(request: Request):
-    access_token = extract_access_token(request)
+def validation_by_access_token(access_token: str) -> login:
     login = temporary_access_tokens.get(access_token)
     if not login:
         raise HTTPException(status_code=401, detail="Invalid access token")
+    return login
+
+@app.get("/users/me", response_model=web_md.UserResponse)
+async def get_current_user(request: Request):
+    access_token = extract_access_token(request)
+    login = validation_by_access_token(access_token)
     
     user = db.get_user_by_login(login)
     if not user:
@@ -60,8 +53,7 @@ async def get_current_user(request: Request):
 @app.get("/users/{user_id}", response_model=web_md.UserResponse)
 async def get_user_by_id(user_id: int, request: Request):
     access_token = extract_access_token(request)
-    if not access_token or access_token not in temporary_access_tokens:
-        raise HTTPException(status_code=401, detail="Invalid access token")
+    _login = validation_by_access_token(access_token)
     
     user = db.get_user_by_id(user_id)
     if not user:
@@ -69,3 +61,28 @@ async def get_user_by_id(user_id: int, request: Request):
     
     response = {"data": user}
     return response
+
+@app.get("/chats", response_model=web_md.ChatsGetResponse)
+async def get_chats(request: Request):
+    access_token = extract_access_token(request)
+    login = validation_by_access_token(access_token)
+
+    user = db.get_user_by_login(login)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    chats = db.get_chats_by_user_id(user.id)
+    response = {
+        "chats_count": len(chats),
+        "data": chats
+    }
+
+    return response
+
+@app.post("/chats")
+async def post_chats(request: web_md.ChatsPostRequest):
+    access_token = extract_access_token(request)
+    login = validation_by_access_token(access_token)
+
+    users = request.users
+    # ...
