@@ -22,6 +22,8 @@ class ChatsGetResponse(BaseModel):
 
 # POST /chats --request
 class ChatsPostRequest(BaseModel):
-    owner_id:       int
-    members:        list[int]
-    
+    name:           int
+    to_user_id:     int
+
+class ChatsPostResponse(BaseModel):
+    data:           ChatModel

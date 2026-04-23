@@ -19,3 +19,10 @@ class ChatModel(BaseModel):
     second_user_id: int
     
     last_msg_text:  str | None = None
+
+class MediaModel(BaseModel):
+    id:             int
+    filename:       str
+    path:           str
+    
+    type:           str = 'multipart/form-data'

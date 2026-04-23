@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from specials import HashManager
 
-from db_models import UserModel, ChatModel
+from db_models import UserModel, ChatModel, MediaModel
 
 load_dotenv('.env')
 
@@ -48,13 +48,32 @@ def get_user_by_id(user_id: int) -> UserModel | None:
             cursor.execute("SELECT id, username, login, avatar_id, status FROM users WHERE id = %s", (user_id,))
             res = cursor.fetchone()
             if res:
-                print(res)
                 user = UserModel(login=res[2], username=res[1], id=res[0], avatar_id=res[3], status=res[4])
                 return user
     finally:
         conn.close()
 
 
+
+
+
+
+
+def get_media(media_id: int) -> MediaModel:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT filename, path FROM media WHERE id = %s", (media_id,))
+            res = cursor.fetchone()
+            if res:
+                model = MediaModel(
+                    id=media_id,
+                    filename=res[0],
+                    path=res[1] 
+                )
+                return model
+    finally:
+        conn.close()
 
 
 
@@ -102,6 +121,27 @@ def get_chats_by_user_id(user_id: int) -> list[ChatModel]:
 
 
 
+def create_chat(chat_name: str, owner: UserModel, recipient: UserModel) -> ChatModel:
+    conn = get_connection()
+    try:
+        fu_id = owner.id
+        su_id = recipient.id
+        with conn.cursor() as cursor:
+            cursor.execute("INSERT INTO chats (name, first_user_id, second_user_id) VALUES (%s, %s, %s) RETURNING id",
+                           (chat_name, fu_id, su_id)
+            )
+            chat_id = cursor.fetchone()[0]
+            conn.commit()
+            model = ChatModel(
+                    id = chat_id,
+                    name = chat_name,
+                    first_user_id = fu_id,
+                    second_user_id = su_id
+                )
+            return model
+    finally:
+        conn.close()
+
 
 
 
@@ -132,11 +172,11 @@ def _create_tables():
     media = "CREATE TABLE IF NOT EXISTS media (" \
         "id             SERIAL  PRIMARY KEY," \
         "filename       TEXT    NOT NULL," \
-        "url            TEXT    NOT NULL" \
+        "path           TEXT    NOT NULL" \
     ")"
     chats = "CREATE TABLE IF NOT EXISTS chats (" \
         "id             SERIAL  PRIMARY KEY," \
-        "avatar_id      INT     REFERENCES media(id)," \
+        "avatar_id      INT     REFERENCES media(id) DEFAULT 1," \
         "name           TEXT    NOT NULL," \
         "first_user_id  INT     REFERENCES users(id)," \
         "second_user_id INT     REFERENCES users(id)" \
