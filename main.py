@@ -40,7 +40,7 @@ def validation_by_access_token(access_token: str) -> login:
     return login
 
 #
-@app.get("/media/{media_id}", response_model=FileResponse)
+@app.get("/media/{media_id}")
 async def get_media(media_id: int, request: Request):
     access_token = extract_access_token(request)
     login = validation_by_access_token(access_token)
@@ -50,15 +50,15 @@ async def get_media(media_id: int, request: Request):
         raise HTTPException(status_code=404, detail="User not found")
     
     media = db.get_media(media_id)
-    response = FileResponse(
+    """response = FileResponse(
         path=media.path,
         media_type=media.type,
         filename=media.filename
-    )
+    )"""
 
-    return response
+    return {}
 # ШАБЛОН
-@app.post("/media/send", response_model=...) # +
+@app.post("/media/send") # +
 async def send_media(request: Request):
     access_token = extract_access_token(request)
     login = validation_by_access_token(access_token)
