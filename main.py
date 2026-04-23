@@ -15,7 +15,7 @@ temporary_access_tokens = {} # access_token: login
 async def login(request: web_md.LoginRequest):
     login = request.login
     password = request.password
-    if not login or password:
+    if not login or not password:
         raise HTTPException(status_code=400, detail="Bad Request")
     # Верификация пользователя
     user = db.verify_user(login, password)
