@@ -187,7 +187,7 @@ def _create_tables():
         "chat_id        INT     REFERENCES chats(id)," \
         "owner_id       INT     REFERENCES users(id)" \
     ")"
-    chats_last_message_column = "ALTER TABLE chats ADD COLUMN IF NOT EXISTS" \
+    chats_last_message_column = "ALTER TABLE chats ADD COLUMN IF NOT EXISTS " \
         "last_message_id INT REFERENCES messages(id) ON DELETE SET NULL"
 
     conn = get_connection()
@@ -225,3 +225,4 @@ if __name__ == "__main__":
         for username, login, password in zip(USERNAMES, LOGINS, PASSWORDS):
             password_hash = HashManager.hash_key(password)
             _new_user(username, login, password_hash)
+        print("Success. (propably)")
