@@ -3,8 +3,8 @@ import web_models as web_md
 
 from specials import HashManager
 
-from fastapi import FastAPI, HTTPException, Depends, Request
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+#from fastapi.responses import FileResponse
 
 app = FastAPI(title='fishmess-server') # Для запуска сервера: uvicorn main:app --reload --port 8000
 #active_connections = {} # Websocket (user_id -> Websocket)
@@ -15,6 +15,8 @@ temporary_access_tokens = {} # access_token: login
 async def login(request: web_md.LoginRequest):
     login = request.login
     password = request.password
+    if not login or password:
+        raise HTTPException(status_code=400, detail="Bad Request")
     # Верификация пользователя
     user = db.verify_user(login, password)
     if not user:
