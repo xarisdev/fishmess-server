@@ -26,139 +26,126 @@ def get_connection():
     )
     return connection
 
+def _execute_query(
+        query: str,
+        params: tuple = (),
+        fetch_one: bool = False
+    ) -> tuple | list[tuple]:
+    with get_connection() as conn:
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(query, params)
+                conn.commit()
+                result = cursor.fetchone() if fetch_one else cursor.fetchall()
+                return result
+        except Exception as exc:
+            print("Database error:", exc)
 
-
+#
+# Работа с пользователями
+#
 
 def get_user_by_login(login: str) -> UserModel | None:
-    conn = get_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT id, username, login, avatar_id, status FROM users WHERE login = %s", (login,))
-            res = cursor.fetchone()
-            if res:
-                user = UserModel(login=res[2], username=res[1], id=res[0], avatar_id=res[3], status=res[4])
-                return user
-    finally:
-        conn.close()
+    query = "SELECT id, username, login, avatar_id, status " \
+            "FROM users " \
+            "WHERE login = %s"
+    result = _execute_query(query, (login,), fetch_one=True)
+    if result:
+        model = UserModel(
+            id=result[0],
+            username=result[1],
+            login=result[2],
+            avatar_id=result[3],
+            status=result[4]
+        )
+        return model
 
 def get_user_by_id(user_id: int) -> UserModel | None:
-    conn = get_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT id, username, login, avatar_id, status FROM users WHERE id = %s", (user_id,))
-            res = cursor.fetchone()
-            if res:
-                user = UserModel(login=res[2], username=res[1], id=res[0], avatar_id=res[3], status=res[4])
-                return user
-    finally:
-        conn.close()
+    query = "SELECT id, username, login, avatar_id, status " \
+            "FROM users " \
+            "WHERE id = %s"
+    result = _execute_query(query, (user_id,), fetch_one=True)
+    if result:
+        model = UserModel(
+            id=result[0],
+            username=result[1],
+            login=result[2],
+            avatar_id=result[3],
+            status=result[4]
+        )
+        return model
 
+#
+# Работа с медиа
+#
 
+def get_media(media_id: int) -> MediaModel | None:
+    query = "SELECT filename, path " \
+            "FROM media " \
+            "WHERE id = %s"
+    result = _execute_query(query, (media_id,), fetch_one=True)
+    if result:
+        model = MediaModel(
+            id=media_id,
+            filename=result[0],
+            path=result[1] 
+        )
+        return model
 
+#
+def save_media(filename: str, path: str) -> int:
+    pass
 
-
-
-
-def get_media(media_id: int) -> MediaModel:
-    conn = get_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT filename, path FROM media WHERE id = %s", (media_id,))
-            res = cursor.fetchone()
-            if res:
-                model = MediaModel(
-                    id=media_id,
-                    filename=res[0],
-                    path=res[1] 
-                )
-                return model
-    finally:
-        conn.close()
-
-
-
-
-
-
+#
+# Работа с чатами
+#
 
 def get_chats_by_user_id(user_id: int) -> list[ChatModel]:
-    conn = get_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                WITH user_chats AS (
-                    SELECT id, avatar_id, name, first_user_id, second_user_id
-                    FROM chats
-                    WHERE first_user_id = %s OR second_user_id = %s
-                )
-                SELECT
-                    chat.id,
-                    chat.avatar_id,
-                    chat.name,
-                    chat.first_user_id,
-                    chat.second_user_id,
-                    (SELECT text FROM messages WHERE chat_id = chat.id ORDER BY id DESC LIMIT 1) AS last_message
-                FROM user_chats chat
-            """, (user_id, user_id)
-            )
-            rows = cursor.fetchall()
-            models = [
-                ChatModel(
-                    id              = row[0],
-                    avatar_id       = row[1],
-                    name            = row[2],
-                    first_user_id   = row[3],
-                    second_user_id  = row[4],
-                    last_msg_text   = row[5]
-                ) for row in rows
-            ]
-            return models
-    finally:
-        conn.close()
+    query = """
+        WITH user_chats AS (
+            SELECT id, avatar_id, name, first_user_id, second_user_id
+            FROM chats
+            WHERE first_user_id = %s OR second_user_id = %s
+        )
+        SELECT
+            chat.id,
+            chat.avatar_id,
+            chat.name,
+            chat.first_user_id,
+            chat.second_user_id,
+            (SELECT text FROM messages WHERE chat_id = chat.id ORDER BY id DESC LIMIT 1) AS last_message
+        FROM user_chats chat
+    """
+    results = _execute_query(query, (user_id, user_id))
+    return [
+        ChatModel(
+            id              = row[0],
+            avatar_id       = row[1],
+            name            = row[2],
+            first_user_id   = row[3],
+            second_user_id  = row[4],
+            last_msg_text   = row[5]
+        ) for row in results
+    ]
 
+def create_chat(chat_name: str, own_id: int, rec_id: int) -> ChatModel:
+    query = "INSERT INTO chats (name, first_user_id, second_user_id) " \
+            "VALUES (%s, %s, %s) " \
+            "RETURNING id"
+    result = _execute_query(query, (chat_name, own_id, rec_id), fetch_one=True)
+    if result:
+        chat_id = result[0]
+        model = ChatModel(
+            id              = chat_id,
+            name            = chat_name,
+            first_user_id   = own_id,
+            second_user_id  = rec_id
+        )
+        return model
 
-
-
-
-
-def create_chat(chat_name: str, owner: UserModel, recipient: UserModel) -> ChatModel:
-    conn = get_connection()
-    try:
-        fu_id = owner.id
-        su_id = recipient.id
-        with conn.cursor() as cursor:
-            cursor.execute("INSERT INTO chats (name, first_user_id, second_user_id) VALUES (%s, %s, %s) RETURNING id",
-                           (chat_name, fu_id, su_id)
-            )
-            chat_id = cursor.fetchone()[0]
-            conn.commit()
-            model = ChatModel(
-                    id = chat_id,
-                    name = chat_name,
-                    first_user_id = fu_id,
-                    second_user_id = su_id
-                )
-            return model
-    finally:
-        conn.close()
-
-
-
-
-
-
-# Верификация пользователя по логину и паролю
-def verify_user(login: str, password: str) -> UserModel | None:
-    conn = get_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT id, username, login, password_hash, avatar_id FROM users WHERE login = %s", (login,))
-            res = cursor.fetchone()
-            if res and HashManager.verify_key(password, res[3]):
-                user = UserModel(id=res[0], username=res[1], login=res[2], avatar_id=res[4])
-                return user
-    finally:
-        conn.close()
+#
+#
+# Базовая настройка
 
 def _create_tables():
     users = "CREATE TABLE IF NOT EXISTS users (" \
@@ -202,6 +189,7 @@ def _create_tables():
     finally:
         conn.close()
 
+# Добавление пользователя
 def _new_user(username: str, login: str, password_hash: str, avatar_id: int | None = None):
     conn = get_connection()
     try:

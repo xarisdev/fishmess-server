@@ -22,8 +22,9 @@ class ChatsGetResponse(BaseModel):
 
 # POST /chats --request
 class ChatsPostRequest(BaseModel):
-    name:           int
+    name:           str
     to_user_id:     int
 
+# POST /chats --response
 class ChatsPostResponse(BaseModel):
     data:           ChatModel

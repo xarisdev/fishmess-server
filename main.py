@@ -121,10 +121,13 @@ async def post_chats(request: web_md.ChatsPostRequest):
     chat_name = request.name
     to_user_id = request.to_user_id
 
-    owner = db.get_user_by_login(login)
-    recipient = db.get_user_by_id(to_user_id)
+    if not chat_name or not to_user_id:
+        raise HTTPException(status_code=400, detail="Bad Request")
 
-    chat_model = db.create_chat(chat_name, owner, recipient)
+    own_id = db.get_user_by_login(login).id
+    rec_id = db.get_user_by_id(to_user_id).id
+
+    chat_model = db.create_chat(chat_name, own_id, rec_id)
 
     response = {"data": chat_model}
     return response
