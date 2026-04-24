@@ -45,6 +45,14 @@ def _execute_query(
 # Работа с пользователями
 #
 
+# Верификация пользователя по логину и паролю
+def verify_user(login: str, password: str) -> UserModel | None:
+    query = "SELECT id, username, login, password_hash, avatar_id FROM users WHERE login = %s"
+    result = _execute_query(query, (login,), fetch_one=True)
+    if result and HashManager.verify_key(password, result[3]):
+        user = UserModel(id=result[0], username=result[1], login=result[2], avatar_id=result[4])
+        return user
+
 def get_user_by_login(login: str) -> UserModel | None:
     query = "SELECT id, username, login, avatar_id, status " \
             "FROM users " \
