@@ -11,6 +11,26 @@ app = FastAPI(title='fishmess-server') # Для запуска сервера: u
 
 temporary_access_tokens = {} # access_token: login
 
+
+def extract_access_token(request: Request) -> str | None:
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        raise HTTPException(status_code=401, detail="Authorization header missing or invalid")
+    access_token = auth_header.split(' ')[-1]
+    return access_token
+
+def validation_by_access_token(access_token: str) -> login:
+    login = temporary_access_tokens.get(access_token)
+    if not login:
+        raise HTTPException(status_code=401, detail="Invalid access token")
+    return login
+
+
+
+
+
+
+# Аутентификация пользователя
 @app.post("/auth/login", response_model=web_md.LoginResponse)
 async def login(request: web_md.LoginRequest):
     login = request.login
@@ -28,20 +48,16 @@ async def login(request: web_md.LoginRequest):
     response = {"access_token": access_token}
     return response
 
-def extract_access_token(request: Request) -> str | None:
-    auth_header = request.headers.get('Authorization')
-    if not auth_header or not auth_header.startswith('Bearer '):
-        raise HTTPException(status_code=401, detail="Authorization header missing or invalid")
-    access_token = auth_header.split(' ')[-1]
-    return access_token
 
-def validation_by_access_token(access_token: str) -> login:
-    login = temporary_access_tokens.get(access_token)
-    if not login:
-        raise HTTPException(status_code=401, detail="Invalid access token")
-    return login
 
-#
+
+
+
+
+
+
+
+# Получение медиафайла
 @app.get("/media/{media_id}")
 async def get_media(media_id: int, request: Request):
     access_token = extract_access_token(request)
@@ -72,6 +88,12 @@ async def send_media(request: Request):
 
 
 
+
+
+
+
+
+# Получение информации о текущем пользователе
 @app.get("/users/me", response_model=web_md.UserResponse)
 async def get_current_user(request: Request):
     access_token = extract_access_token(request)
@@ -84,6 +106,7 @@ async def get_current_user(request: Request):
     response = {"data": user}
     return response
 
+# Получение информации о пользователе по id
 @app.get("/users/{user_id}", response_model=web_md.UserResponse)
 async def get_user_by_id(user_id: int, request: Request):
     access_token = extract_access_token(request)
@@ -96,6 +119,7 @@ async def get_user_by_id(user_id: int, request: Request):
     response = {"data": user}
     return response
 
+# Получение списка чатов
 @app.get("/chats", response_model=web_md.ChatsGetResponse)
 async def get_chats(request: Request):
     access_token = extract_access_token(request)
@@ -113,6 +137,7 @@ async def get_chats(request: Request):
 
     return response
 
+# Создание чата
 @app.post("/chats", response_model=web_md.ChatsPostResponse)
 async def post_chats(request: web_md.ChatsPostRequest):
     access_token = extract_access_token(request)
@@ -123,11 +148,34 @@ async def post_chats(request: web_md.ChatsPostRequest):
 
     if not chat_name or not to_user_id:
         raise HTTPException(status_code=400, detail="Bad Request")
-
+    # Исключение создания чата с несуществующим пользователем
+    # БД вызовет ошибку если нет одного из пользователей
     own_id = db.get_user_by_login(login).id
     rec_id = db.get_user_by_id(to_user_id).id
 
     chat_model = db.create_chat(chat_name, own_id, rec_id)
 
+    if isinstance(chat_model, tuple):
+        raise HTTPException(*chat_model)
+
     response = {"data": chat_model}
+    return response
+
+# Отправка сообщения в чат
+@app.post("/chats/{chat_id}/messages", response_model=web_md.MessagesPostResponse)
+async def post_message(chat_id: int, request: web_md.MessagesPostRequest):
+    access_token = extract_access_token(request)
+    login = validation_by_access_token(access_token)
+
+    chat_id = chat_id
+    text = request.text
+    if not text:
+        raise HTTPException(status_code=400, detail="Bad Request")
+
+    user = db.get_user_by_login(login)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    message_model = db.send_message(chat_id, user.id, text)
+    response = {"data": message_model}
     return response

@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from specials import HashManager
 
-from db_models import UserModel, ChatModel, MediaModel
+from db_models import UserModel, ChatModel, MediaModel, MessageModel
 
 load_dotenv('.env')
 
@@ -136,7 +136,20 @@ def get_chats_by_user_id(user_id: int) -> list[ChatModel]:
         ) for row in results
     ]
 
-def create_chat(chat_name: str, own_id: int, rec_id: int) -> ChatModel:
+def create_chat(chat_name: str, own_id: int, rec_id: int) -> ChatModel | tuple[int, str]:
+    # Проверка на существование чата
+    already_exists = _execute_query(
+        "SELECT id " \
+        "FROM chats " \
+        "WHERE "
+            "(first_user_id = %s AND second_user_id = %s) OR "
+            "(first_user_id = %s AND second_user_id = %s)",
+        (own_id, rec_id, rec_id, own_id),
+        fetch_one=True
+    )
+    if already_exists:
+        return (400, "Bad Request: Chat already exists")
+    # Создание чата
     query = "INSERT INTO chats (name, first_user_id, second_user_id) " \
             "VALUES (%s, %s, %s) " \
             "RETURNING id"
@@ -151,6 +164,20 @@ def create_chat(chat_name: str, own_id: int, rec_id: int) -> ChatModel:
         )
         return model
 
+def send_message(chat_id: int, owner_id: int, text: str) -> MessageModel:
+    query = "INSERT INTO messages (text, chat_id, owner_id) " \
+            "VALUES (%s, %s, %s) " \
+            "RETURNING id"
+    result = _execute_query(query, (text, chat_id, owner_id), fetch_one=True)
+    if result:
+        message_id = result[0]
+        model = MessageModel(
+            id=message_id,
+            text=text,
+            chat_id=chat_id,
+            owner_id=owner_id
+        )
+        return model
 #
 #
 # Базовая настройка

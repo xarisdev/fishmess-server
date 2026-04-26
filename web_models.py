@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
 
-from db_models import UserModel, ChatModel
+from db_models import UserModel, ChatModel, MessageModel
 
 # POST /auth/login --request
 class LoginRequest(BaseModel):
@@ -15,16 +15,30 @@ class LoginResponse(BaseModel):
 class UserResponse(BaseModel):
     data:           UserModel
 
-# GET /chats --response
+# Получение списка чатов
+# GET /chats --response_model
 class ChatsGetResponse(BaseModel):
     chats_count:    int
     data:           list[ChatModel]
 
+# Создание чата - запрос
 # POST /chats --request
 class ChatsPostRequest(BaseModel):
     name:           str
     to_user_id:     int
 
+# Создание чата - ответ
 # POST /chats --response
 class ChatsPostResponse(BaseModel):
     data:           ChatModel
+
+
+# Отправка сообщения - запрос
+# POST /chats/{chat_id}/messages --request
+class MessagesPostRequest(BaseModel):
+    text:           str
+
+# Отправка сообщения - ответ
+# POST /chats/{chat_id}/messages --response
+class MessagesPostResponse(BaseModel):
+    data:           MessageModel

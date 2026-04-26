@@ -26,3 +26,9 @@ class MediaModel(BaseModel):
     path:           str
     
     type:           str = 'multipart/form-data'
+
+class MessageModel(BaseModel):
+    id:             int
+    text:           str
+    chat_id:        int
+    owner_id:       int
