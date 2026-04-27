@@ -88,17 +88,7 @@ def get_user_by_id(user_id: int) -> UserModel | None:
 #
 
 def get_media(media_id: int) -> MediaModel | None:
-    query = "SELECT filename, path " \
-            "FROM media " \
-            "WHERE id = %s"
-    result = _execute_query(query, (media_id,), fetch_one=True)
-    if result:
-        model = MediaModel(
-            id=media_id,
-            filename=result[0],
-            path=result[1] 
-        )
-        return model
+    pass
 
 #
 def save_media(filename: str, path: str) -> int:
@@ -178,6 +168,20 @@ def send_message(chat_id: int, owner_id: int, text: str) -> MessageModel:
             owner_id=owner_id
         )
         return model
+
+def get_messages(chat_id: int, limit: int) -> list[MessageModel]:
+    query = "SELECT * " \
+            "FROM messages " \
+            "WHERE chat_id = %s"
+    result = _execute_query(query, (chat_id,))
+    if result:
+        messages = result[:limit]
+        models = [
+            MessageModel(id=message[0], text=message[1], chat_id=message[2], owner_id=message[3])
+            for message in messages
+        ]
+        return models
+
 #
 #
 # Базовая настройка
@@ -198,7 +202,7 @@ def _create_tables():
     ")"
     chats = "CREATE TABLE IF NOT EXISTS chats (" \
         "id             SERIAL  PRIMARY KEY," \
-        "avatar_id      INT     REFERENCES media(id) DEFAULT 1," \
+        "avatar_id      INT     REFERENCES media(id) DEFAULT NULL," \
         "name           TEXT    NOT NULL," \
         "first_user_id  INT     REFERENCES users(id)," \
         "second_user_id INT     REFERENCES users(id)" \

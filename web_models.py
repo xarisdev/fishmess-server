@@ -2,43 +2,31 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from db_models import UserModel, ChatModel, MessageModel
-
-# POST /auth/login --request
+# /auth/login
 class LoginRequest(BaseModel):
     login:          str
     password:       str
-# POST /auth/login --response
 class LoginResponse(BaseModel):
     access_token:   str
-
-# GET /users/me OR /users/{id} --response
+# /users
 class UserResponse(BaseModel):
     data:           UserModel
-
-# Получение списка чатов
-# GET /chats --response_model
+# /chats
 class ChatsGetResponse(BaseModel):
     chats_count:    int
     data:           list[ChatModel]
-
-# Создание чата - запрос
-# POST /chats --request
+# /chats
 class ChatsPostRequest(BaseModel):
     name:           str
     to_user_id:     int
-
-# Создание чата - ответ
-# POST /chats --response
 class ChatsPostResponse(BaseModel):
     data:           ChatModel
-
-
-# Отправка сообщения - запрос
-# POST /chats/{chat_id}/messages --request
+# /chats/chat_id/messages
 class MessagesPostRequest(BaseModel):
     text:           str
-
-# Отправка сообщения - ответ
-# POST /chats/{chat_id}/messages --response
 class MessagesPostResponse(BaseModel):
     data:           MessageModel
+# /chats/chat_id/messages
+class MessagesGetResponse(BaseModel):
+    messages_count: int
+    data:           list[MessageModel]

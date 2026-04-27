@@ -1,115 +1,83 @@
 import db
-import web_models as web_md
+import web_models as wmd
 
 from specials import HashManager
 
-from fastapi import FastAPI, HTTPException, Request
-#from fastapi.responses import FileResponse
+from fastapi import (
+    FastAPI, HTTPException,
+    Request, Header
+)
 
-app = FastAPI(title='fishmess-server') # Для запуска сервера: uvicorn main:app --reload --port 8000
+# Для запуска сервера: uvicorn main:app --reload --port 8000
+app = FastAPI(title='fishmess-server')
+
 #active_connections = {} # Websocket (user_id -> Websocket)
 
-temporary_access_tokens = {} # access_token: login
+# access_token: login
+temporary_access_tokens = {}
 
+def extract_access_token(auth: str) -> str:
+    if not auth:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization header missing or invalid"
+        )
 
-def extract_access_token(request: Request) -> str | None:
-    auth_header = request.headers.get('Authorization')
-    if not auth_header or not auth_header.startswith('Bearer '):
-        raise HTTPException(status_code=401, detail="Authorization header missing or invalid")
-    access_token = auth_header.split(' ')[-1]
+    access_token = auth.split(' ')[1]
     return access_token
 
 def validation_by_access_token(access_token: str) -> login:
     login = temporary_access_tokens.get(access_token)
     if not login:
-        raise HTTPException(status_code=401, detail="Invalid access token")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid access token"
+        )
+
     return login
 
-
-
-
-
-
 # Аутентификация пользователя
-@app.post("/auth/login", response_model=web_md.LoginResponse)
-async def login(request: web_md.LoginRequest):
+@app.post("/auth/login", response_model=wmd.LoginResponse)
+async def login(request: wmd.LoginRequest):
     login = request.login
     password = request.password
     if not login or not password:
-        raise HTTPException(status_code=400, detail="Bad Request")
-    # Верификация пользователя
+        raise HTTPException(
+            status_code=400,
+            detail="Bad Request"
+        )
+    
     user = db.verify_user(login, password)
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid login or password")
-    # Постоянный токен доступа
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid login or password"
+        )
+    
     access_token = HashManager.generate_token()
     temporary_access_tokens[access_token] = login
-    # Ответ 200
+    
     response = {"access_token": access_token}
     return response
 
-
-
-
-
-
-
-
-
-
-# Получение медиафайла
-@app.get("/media/{media_id}")
-async def get_media(media_id: int, request: Request):
-    access_token = extract_access_token(request)
-    login = validation_by_access_token(access_token)
-
-    user = db.get_user_by_login(login)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    media = db.get_media(media_id)
-    """response = FileResponse(
-        path=media.path,
-        media_type=media.type,
-        filename=media.filename
-    )"""
-
-    return {}
-# ШАБЛОН
-@app.post("/media/send") # +
-async def send_media(request: Request):
-    access_token = extract_access_token(request)
-    login = validation_by_access_token(access_token)
-
-    user = db.get_user_by_login(login)
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    
-
-
-
-
-
-
-
-
-# Получение информации о текущем пользователе
-@app.get("/users/me", response_model=web_md.UserResponse)
-async def get_current_user(request: Request):
-    access_token = extract_access_token(request)
+@app.get("/users/me", response_model=wmd.UserResponse)
+async def get_current_user(auth: str = Header(...)):
+    access_token = extract_access_token(auth)
     login = validation_by_access_token(access_token)
     
     user = db.get_user_by_login(login)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
     
     response = {"data": user}
     return response
 
-# Получение информации о пользователе по id
-@app.get("/users/{user_id}", response_model=web_md.UserResponse)
-async def get_user_by_id(user_id: int, request: Request):
-    access_token = extract_access_token(request)
+@app.get("/users/{user_id}", response_model=wmd.UserResponse)
+async def get_user_by_id(user_id: int, auth: str = Header(...)):
+    access_token = extract_access_token(auth)
     _login = validation_by_access_token(access_token)
     
     user = db.get_user_by_id(user_id)
@@ -119,28 +87,28 @@ async def get_user_by_id(user_id: int, request: Request):
     response = {"data": user}
     return response
 
-# Получение списка чатов
-@app.get("/chats", response_model=web_md.ChatsGetResponse)
-async def get_chats(request: Request):
-    access_token = extract_access_token(request)
+@app.get("/chats", response_model=wmd.ChatsGetResponse)
+async def get_chats(auth: str = Header(...)):
+    access_token = extract_access_token(auth)
     login = validation_by_access_token(access_token)
 
     user = db.get_user_by_login(login)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
     
     chats = db.get_chats_by_user_id(user.id)
     response = {
         "chats_count": len(chats),
         "data": chats
     }
-
     return response
 
-# Создание чата
-@app.post("/chats", response_model=web_md.ChatsPostResponse)
-async def post_chats(request: web_md.ChatsPostRequest):
-    access_token = extract_access_token(request)
+@app.post("/chats", response_model=wmd.ChatsPostResponse)
+async def post_chats(request: wmd.ChatsPostRequest, auth: str = Header(...)):
+    access_token = extract_access_token(auth)
     login = validation_by_access_token(access_token)
 
     chat_name = request.name
@@ -162,9 +130,9 @@ async def post_chats(request: web_md.ChatsPostRequest):
     return response
 
 # Отправка сообщения в чат
-@app.post("/chats/{chat_id}/messages", response_model=web_md.MessagesPostResponse)
-async def post_message(chat_id: int, request: web_md.MessagesPostRequest):
-    access_token = extract_access_token(request)
+@app.post("/chats/{chat_id}/messages", response_model=wmd.MessagesPostResponse)
+async def post_message(chat_id: int, request: wmd.MessagesPostRequest, auth: str = Header(...)):
+    access_token = extract_access_token(auth)
     login = validation_by_access_token(access_token)
 
     chat_id = chat_id
@@ -178,4 +146,21 @@ async def post_message(chat_id: int, request: web_md.MessagesPostRequest):
     
     message_model = db.send_message(chat_id, user.id, text)
     response = {"data": message_model}
+    return response
+
+# Получение списка сообщений
+@app.get("/chats/{chat_id}/messages", response_model=wmd.MessagesGetResponse)
+async def get_messages(chat_id: int, limit: int = 50, auth: str = Header(...)):
+    access_token = extract_access_token(auth)
+    login = validation_by_access_token(access_token)
+
+    user = db.get_user_by_login(login)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    messages = db.get_messages(chat_id, limit)
+    response = {
+        "messages_count": len(messages),
+        "data": messages
+    }
     return response
