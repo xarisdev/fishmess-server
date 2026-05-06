@@ -1,40 +1,99 @@
 import db
 import web_models as wmd
 
+# import logging
+from typing import Annotated
+
 from specials import HashManager
 
 from fastapi import (
     FastAPI, HTTPException,
-    Request, Header
+    Request, Header, Depends, status,
+    WebSocket, WebSocketDisconnect, WebSocketException
 )
 
 # Для запуска сервера: uvicorn main:app --reload --port 8000
 app = FastAPI(title='fishmess-server')
+# Обработчик WebSocket соединений
+class ClientsManager:
+    def __init__(self):
+        self.active_connections: dict[str, WebSocket] = {}
 
-#active_connections = {} # Websocket (user_id -> Websocket)
+    async def connect(self, login: str, websocket: WebSocket):
+        self.active_connections[login] = websocket
+        await websocket.accept()
 
-# access_token: login
-temporary_access_tokens = {}
+    def disconnect(self, login: str = None) -> WebSocket:
+        connection = self.active_connections.pop(login)
+        return connection
 
-def extract_access_token(auth: str) -> str:
-    if not auth:
-        raise HTTPException(
-            status_code=401,
-            detail="Authorization header missing or invalid"
-        )
+    async def send_personal_message(self, message: str, login: str):
+        connection = await self.active_connections.get(login)
+        if connection:
+            await connection.send_text(message)
 
-    access_token = auth.split(' ')[1]
-    return access_token
+    async def broadcast(self, message: str):
+        for connection in self.active_connections.values():
+            await connection.send_text(message)
 
-def validation_by_access_token(access_token: str) -> login:
-    login = temporary_access_tokens.get(access_token)
-    if not login:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid access token"
-        )
+# Хранилище сессий доступа
+class AccessManager:
+    sessions: dict[str, str] = {}
 
-    return login
+    def _extract_access_token(self, authorization: str) -> str:
+        if not authorization:
+            #logging.warning(f"")
+            raise HTTPException(
+                status_code=401,
+                detail="Authorization header missing or invalid"
+            )
+        access_token = authorization.split(' ')[1]
+        return access_token
+
+    def create_session(self, access_token: str, login: str):
+        self.sessions[access_token] = login
+        #logging.info(f"Session created for login: {login}")
+
+    def get_login(self, authorization: str) -> str:
+        access_token = self._extract_access_token(authorization)
+        login = self.sessions.get(access_token)
+        if not login:
+            #logging.warning(f"")
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid access token"
+            )
+        #logging.info(f"")
+        return login
+    
+    def remove_session(self, access_token: str) -> str | None:
+        if access_token in self.sessions:
+            login = self.sessions.pop(access_token)
+            if login:
+                #logging.info(f"")
+                return login
+            #logging.warning(f"")
+        else:
+            #logging.warning(f"")
+            pass 
+
+    def ws_depends(self, websocket: WebSocket, authorization: Annotated[str | None, Header(...)] = None):
+        if authorization is None:
+            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+        login = self.get_login(authorization)
+        return login
+
+access_manager = AccessManager() # Временное хранилище сессий доступа
+clients_manager = ClientsManager() # Временное хранилище websocket клиентов
+
+@app.websocket("/ws/broadcast")
+async def websocket_endpoint(websocket: WebSocket, login: Annotated[str, Depends(access_manager.ws_depends)]):
+    await clients_manager.connect(login, websocket)
+
+    data = await websocket.receive_text() # Тесты
+    print(data)
+
+    await websocket.send_text(f"Session by login {login}")
 
 # Аутентификация пользователя
 @app.post("/auth/login", response_model=wmd.LoginResponse)
@@ -55,16 +114,15 @@ async def login(request: wmd.LoginRequest):
         )
     
     access_token = HashManager.generate_token()
-    temporary_access_tokens[access_token] = login
+    access_manager.create_session(access_token, login)
     
     response = {"access_token": access_token}
     return response
 
 @app.get("/users/me", response_model=wmd.UserResponse)
-async def get_current_user(auth: str = Header(...)):
-    access_token = extract_access_token(auth)
-    login = validation_by_access_token(access_token)
-    
+async def get_current_user(authorization: str = Header(...)):
+    login = access_manager.get_login(authorization)
+
     user = db.get_user_by_login(login)
     if not user:
         raise HTTPException(
@@ -76,9 +134,8 @@ async def get_current_user(auth: str = Header(...)):
     return response
 
 @app.get("/users/{user_id}", response_model=wmd.UserResponse)
-async def get_user_by_id(user_id: int, auth: str = Header(...)):
-    access_token = extract_access_token(auth)
-    _login = validation_by_access_token(access_token)
+async def get_user_by_id(user_id: int, authorization: str = Header(...)):
+    _login = access_manager.get_login(authorization)
     
     user = db.get_user_by_id(user_id)
     if not user:
@@ -88,9 +145,8 @@ async def get_user_by_id(user_id: int, auth: str = Header(...)):
     return response
 
 @app.get("/chats", response_model=wmd.ChatsGetResponse)
-async def get_chats(auth: str = Header(...)):
-    access_token = extract_access_token(auth)
-    login = validation_by_access_token(access_token)
+async def get_chats(authorization: str = Header(...)):
+    login = access_manager.get_login(authorization)
 
     user = db.get_user_by_login(login)
     if not user:
@@ -107,9 +163,8 @@ async def get_chats(auth: str = Header(...)):
     return response
 
 @app.post("/chats", response_model=wmd.ChatsPostResponse)
-async def post_chats(request: wmd.ChatsPostRequest, auth: str = Header(...)):
-    access_token = extract_access_token(auth)
-    login = validation_by_access_token(access_token)
+async def post_chats(request: wmd.ChatsPostRequest, authorization: str = Header(...)):
+    login = access_manager.get_login(authorization)
 
     chat_name = request.name
     to_user_id = request.to_user_id
@@ -131,9 +186,8 @@ async def post_chats(request: wmd.ChatsPostRequest, auth: str = Header(...)):
 
 # Отправка сообщения в чат
 @app.post("/chats/{chat_id}/messages", response_model=wmd.MessagesPostResponse)
-async def post_message(chat_id: int, request: wmd.MessagesPostRequest, auth: str = Header(...)):
-    access_token = extract_access_token(auth)
-    login = validation_by_access_token(access_token)
+async def post_message(chat_id: int, request: wmd.MessagesPostRequest, authorization: str = Header(...)):
+    login = access_manager.get_login(authorization)
 
     chat_id = chat_id
     text = request.text
@@ -150,9 +204,8 @@ async def post_message(chat_id: int, request: wmd.MessagesPostRequest, auth: str
 
 # Получение списка сообщений
 @app.get("/chats/{chat_id}/messages", response_model=wmd.MessagesGetResponse)
-async def get_messages(chat_id: int, limit: int = 50, auth: str = Header(...)):
-    access_token = extract_access_token(auth)
-    login = validation_by_access_token(access_token)
+async def get_messages(chat_id: int, limit: int = 50, authorization: str = Header(...)):
+    login = access_manager.get_login(authorization)
 
     user = db.get_user_by_login(login)
     if not user:

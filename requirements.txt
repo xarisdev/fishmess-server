@@ -5,3 +5,4 @@ passlib
 bcrypt==4.0.1
 python-jose==3.5.0
 psycopg2
+uvicorn[standard]
