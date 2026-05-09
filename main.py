@@ -228,15 +228,36 @@ async def get_messages(chat_id: int, limit: int = 50, authorization: str = Heade
         "data": messages
     }
     return response
-""" Заготовка под файлы
-@app.post("/file", response_model=wmd.)
-async def post_file(request = wmd., authorization: str = Header(...)):
-    pass
+"""
+# Заготовка под файлы
+@app.post("/file")
+async def post_file(file: UploadFile, authorization: str = Header(...)):
+    import shutil
 
-@app.get("/file/{file_id}", response_model=wmd.)
+    _bytes = file.file.read()
+
+
+
+@app.get("/file/{file_id}", response_model=wmd.FileGetResponse)
 async def get_file(file_id: int, authorization: str = Header(...)):
     login = access_manager.get_login(authorization)
 
     if not file_id:
         raise HTTPException(status_code=400, detail="Bad Request")
+    
+    # Запрос к бд
+    # Загрузка файла
+    # Возврат файла
+
+@app.delete("/file/{file_id}")
+async def delete_file(file_id: int, authorization: str = Header(...)):
+    _login = access_manager.get_login(authorization)
+    
+    if not file_id:
+        HTTPException(status_code=400, detail="Bad Request")
+
+    # Поиск файла из бд
+    # Удаление записи в бд
+    
+    return Response(status_code=204)
 """
