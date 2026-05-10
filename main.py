@@ -9,8 +9,10 @@ logging.basicConfig(
 import db
 import web_models as wmd
 
+from datetime import datetime
+
 from typing import Annotated
-from specials import HashManager
+from specials import HashManager, FileManager
 
 from fastapi import (
     FastAPI, HTTPException,
@@ -18,6 +20,7 @@ from fastapi import (
     File, UploadFile,
     WebSocket, WebSocketDisconnect, WebSocketException
 )
+from fastapi.responses import FileResponse
 
 # Для запуска сервера: uvicorn main:app --reload --port 8000
 app = FastAPI(title='fishmess-server')
@@ -96,6 +99,7 @@ class AccessManager:
 
 access_manager = AccessManager() # Временное хранилище сессий доступа
 clients_manager = ClientsManager() # Временное хранилище websocket клиентов
+file_manager = FileManager() # Работа с файлами
 
 @app.websocket("/ws/broadcast")
 async def websocket_endpoint(websocket: WebSocket, login: Annotated[str, Depends(access_manager.ws_depends)]):
@@ -228,27 +232,50 @@ async def get_messages(chat_id: int, limit: int = 50, authorization: str = Heade
         "data": messages
     }
     return response
-"""
-# Заготовка под файлы
+
+# Отправка файла (серверу)
 @app.post("/file")
-async def post_file(file: UploadFile, authorization: str = Header(...)):
-    import shutil
+async def post_file(file: UploadFile = File, authorization: str = Header(...)):
+    login = access_manager.get_login(authorization)
+    user = db.get_user_by_login(login)
 
-    _bytes = file.file.read()
+    if not file:
+        raise HTTPException(status_code=400, detail="Bad Request")
 
+    result= file_manager.save(file)
+    if result[0] == 201:
+        _code, _info, _path = result 
+        file_id = db.save_file(file.filename, _path, user.id)
 
-
-@app.get("/file/{file_id}", response_model=wmd.FileGetResponse)
+        return {"info": _info, "file_id": file_id}
+# Получение файла (клиент)
+@app.get("/file/{file_id}")
 async def get_file(file_id: int, authorization: str = Header(...)):
     login = access_manager.get_login(authorization)
+    user = db.get_user_by_login(login)
 
-    if not file_id:
-        raise HTTPException(status_code=400, detail="Bad Request")
-    
-    # Запрос к бд
-    # Загрузка файла
-    # Возврат файла
+    file_model = db.get_file(file_id, user.id)
+    if file_model == 403:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": 403,
+                    "message": "Forbidden",
+                    "details": {},
+                    "timestamp": datetime.timestamp()
+                }
+            }
+        )
+    result = file_manager.load(file_model)
+    if isinstance(result, tuple):
+        raise HTTPException(
+            status_code=result[0],
+            detail=result[1]
+        )
+    return result
 
+"""
 @app.delete("/file/{file_id}")
 async def delete_file(file_id: int, authorization: str = Header(...)):
     _login = access_manager.get_login(authorization)
@@ -258,6 +285,4 @@ async def delete_file(file_id: int, authorization: str = Header(...)):
 
     # Поиск файла из бд
     # Удаление записи в бд
-    
-    return Response(status_code=204)
 """
