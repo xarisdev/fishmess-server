@@ -20,12 +20,11 @@ class ChatModel(BaseModel):
     
     last_msg_text:  str | None = None
 
-class MediaModel(BaseModel):
+class FileModel(BaseModel):
     id:             int
     filename:       str
-    path:           str
-    
-    type:           str = 'multipart/form-data'
+    filepath:       str
+    user_id:        int
 
 class MessageModel(BaseModel):
     id:             int

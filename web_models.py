@@ -34,15 +34,3 @@ class MessagesPostResponse(BaseModel):
 class MessagesGetResponse(BaseModel):
     messages_count: int
     data:           list[MessageModel]
-"""
-# /file
-class FilePostRequest(BaseModel):
-    metadata:       dict
-class FilePostResponse(BaseModel):
-    file_id:        int
-# /file/{id}
-class FileGetResponse(BaseModel):
-    metadata:       dict
-    file_id:        int
-    file_name:      str
-"""

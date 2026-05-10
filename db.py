@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from specials import HashManager
 
-from db_models import UserModel, ChatModel, MediaModel, MessageModel
+from db_models import UserModel, ChatModel, FileModel, MessageModel
 
 load_dotenv('.env')
 
@@ -86,28 +86,23 @@ def get_user_by_id(user_id: int) -> UserModel | None:
 #
 # Работа с медиа
 #
-"""
-from specials import FileManager
-file_manager = FileManager()
-
-def get_media(media_id: int) -> MediaModel | None:
-    query = "SELECT filename, path FROM media WHERE id = %s"
-    result = _execute_query(
-        query,
-        (media_id,)
-    )
+def save_file(filename: str, filepath: str, user_id: int) -> int:
+    query = "INSERT INTO media (filename, path, user_id) " \
+            "VALUES (%s, %s, %s) " \
+            "RETURNING id"
+    result = _execute_query(query, (filename, filepath, user_id), fetch_one=True)
     if result:
-        filename, filepath = result
-        media_data = file_manager.load_for_path(filepath)
-        if isinstance(media_data, tuple):
-            return media_data
-        model = MediaModel(media_id, filename, filepath)
-        return model
+        media_id = result[0]
+        return media_id
 
-#
-def save_media(filename: str, path: str) -> int:
-    pass
-"""
+def get_file(file_id: int, user_id: int) -> FileModel:
+    query = "SELECT * FROM media WHERE id = %s"
+    result = _execute_query(query, (file_id,), fetch_one=True)
+    if result:
+        if result[-1] != user_id:
+            return 403
+        model = FileModel(*result)
+        return model
 #
 # Работа с чатами
 #
@@ -229,12 +224,15 @@ def _create_tables():
     ")"
     chats_last_message_column = "ALTER TABLE chats ADD COLUMN IF NOT EXISTS " \
         "last_message_id INT REFERENCES messages(id) ON DELETE SET NULL"
+    media_alter = "ALTER TABLE media ADD COLUMN IF NOT EXISTS " \
+        "user_id INT REFERENCES users(id) ON DELETE SET NULL"
 
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute(media)
             cursor.execute(users)
+            cursor.execute(media_alter)
             cursor.execute(chats)
             cursor.execute(messages)
             cursor.execute(chats_last_message_column)
