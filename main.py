@@ -61,6 +61,10 @@ class AccessManager:
         return access_token
 
     def create_session(self, access_token: str, login: str):
+        # Проверка на существование сессии
+        if login in self.sessions.values():
+            logging.info(f"Active session found. Removing login: {login}")
+            self.remove_session_by_login(login)
         self.sessions[access_token] = login
         logging.info(f"Session created for login: {login}")
 
@@ -82,14 +86,23 @@ class AccessManager:
             logging.error("Critical authorization error", exc_info=True)
     
     def remove_session(self, access_token: str) -> str | None:
-        if access_token in self.sessions:
-            login = self.sessions.pop(access_token)
-            if login:
-                logging.info(f"Removed session for {login}")
-                return login
-            logging.info(f"Session not found")
+        login = self.sessions.pop(access_token, None)
+        if login:
+            logging.info(f"Removed session for {login}")
+            return login
         else:
             logging.info(f"Session not exists for access_token")
+
+    def remove_session_by_login(self, login: str):
+        # Подрузамевается, что проверка на наличие логина уже выполнена до вызова. `login in sessions -> True`
+        _rmlogin = None
+        for k, v in self.sessions.items():
+            if v == login:
+                _rmlogin = self.sessions.pop(k)
+                logging.info(f"Removed session for {login}")
+                break
+        if _rmlogin is None:
+            logging.info(f"Can't find {login} in `sessions`")
 
     def ws_depends(self, websocket: WebSocket, authorization: Annotated[str | None, Header(...)] = None):
         if authorization is None:
