@@ -1,8 +1,9 @@
+import asyncio
 import logging
 logging.basicConfig(
     level=logging.INFO,
     filename="server.log",
-    filemode="w", # "a"
+    filemode="a", #"w"
     format="%(asctime)s %(levelname)s %(message)s"
 )
 
@@ -27,24 +28,36 @@ app = FastAPI(title='fishmess-server')
 # Обработчик WebSocket соединений
 class ClientsManager:
     def __init__(self):
+        self._lock = asyncio.Lock()
+
         self.active_connections: dict[str, WebSocket] = {}
 
-    async def connect(self, login: str, websocket: WebSocket):
-        self.active_connections[login] = websocket
-        await websocket.accept()
+    def _get_conn_by_login(self, login: str, rm: bool = False) -> WebSocket | None:
+        if rm: websocket = self.active_connections.pop(login, None)
+        else: websocket = self.active_connections.get(login)
+        return websocket
 
-    def disconnect(self, login: str = None) -> WebSocket:
-        connection = self.active_connections.pop(login)
-        return connection
+    async def connect(self, websocket: WebSocket, login: str):
+        async with self._lock:    
+            ws = self._get_conn_by_login(login, True)
+            if ws is not None:
+                logging.info(f"WebSocket connection for login: {login} already exists. Wait to close..")
+                await self.close_connection(ws)
+            try:
+                await websocket.accept()
+                self.active_connections[login] = websocket
+                logging.info(f"Accept new WebSocket connection for login: {login}")
+            except Exception as exc:
+                logging.error(f"Accept error WS for login: {login}", exc_info=exc)
+                raise WebSocketException(code=status.WS_1014_BAD_GATEWAY)
 
-    async def send_personal_message(self, message: str, login: str):
-        connection = await self.active_connections.get(login)
-        if connection:
-            await connection.send_text(message)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections.values():
-            await connection.send_text(message)
+    async def close_connection(self, websocket: WebSocket | None = None):
+        try:
+            await websocket.close()
+            logging.info(f"Succes close weboscket connection")
+        except Exception as exc:
+            logging.error(f"Can't close websocket connection", exc_info=exc)
+            raise WebSocketException(code=status.WS_1011_INTERNAL_ERROR)
 
 # Хранилище сессий доступа
 class AccessManager:
@@ -64,9 +77,9 @@ class AccessManager:
         # Проверка на существование сессии
         if login in self.sessions.values():
             logging.info(f"Active session found. Removing login: {login}")
-            self.remove_session_by_login(login)
+            self._remove_session_by_login(login)
         self.sessions[access_token] = login
-        logging.info(f"Session created for login: {login}")
+        logging.info(f"NEW Session token created for login: {login}")
 
     def get_login(self, authorization: str) -> str:
         try:
@@ -85,7 +98,7 @@ class AccessManager:
         except Exception as exc:
             logging.error("Critical authorization error", exc_info=True)
     
-    def remove_session(self, access_token: str) -> str | None:
+    def _remove_session(self, access_token: str) -> str | None:
         login = self.sessions.pop(access_token, None)
         if login:
             logging.info(f"Removed session for {login}")
@@ -93,7 +106,7 @@ class AccessManager:
         else:
             logging.info(f"Session not exists for access_token")
 
-    def remove_session_by_login(self, login: str):
+    def _remove_session_by_login(self, login: str):
         # Подрузамевается, что проверка на наличие логина уже выполнена до вызова. `login in sessions -> True`
         _rmlogin = None
         for k, v in self.sessions.items():
@@ -114,14 +127,10 @@ access_manager = AccessManager() # Временное хранилище сес�
 clients_manager = ClientsManager() # Временное хранилище websocket клиентов
 file_manager = FileManager() # Работа с файлами
 
-@app.websocket("/ws/broadcast")
+@app.websocket("/ws/pp")
 async def websocket_endpoint(websocket: WebSocket, login: Annotated[str, Depends(access_manager.ws_depends)]):
-    await clients_manager.connect(login, websocket)
-
-    data = await websocket.receive_text() # Тесты
-    print(data)
-
-    await websocket.send_text(f"Session by login {login}")
+    await clients_manager.connect(websocket, login)
+    websocket.send_text("ping <-> pong")
 
 # Аутентификация пользователя
 @app.post("/auth/login", response_model=wmd.LoginResponse)
