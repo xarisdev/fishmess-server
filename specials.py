@@ -21,16 +21,16 @@ class HashManager:
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
     
     @classmethod
-    def hash_key(cls, plain_key: str) -> str:
-        return cls.pwd_context.hash(plain_key)
+    def hash_key(cls, secret_key: str) -> str:
+        return cls.pwd_context.hash(secret_key)
     
     @classmethod
-    def verify_key(cls, plain_key: str, hashed_key: str) -> bool:
-        return cls.pwd_context.verify(plain_key, hashed_key)
+    def verify_key(cls, secret_key: str, hashed_key: str) -> bool:
+        return cls.pwd_context.verify(secret_key, hashed_key)
     
     @staticmethod
-    def generate_token() -> str:
-        token = token_urlsafe(32)
+    def generate_token(nbytes: int = 32) -> str:
+        token = token_urlsafe(nbytes)
         return token
     
 class FileManager:
