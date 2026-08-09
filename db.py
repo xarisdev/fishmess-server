@@ -1,113 +1,163 @@
-import psycopg2 as pc2
-
 from os import getenv
 from dotenv import load_dotenv
 
-from datetime import datetime
-from specials import HashManager
-
-from db_models import UserModel, ChatModel, FileModel, MessageModel
-
 load_dotenv('.env')
 
-DATABASE_NAME = getenv('DATABASE_NAME')
-DATABASE_HOST = getenv('DATABASE_HOST')
-DATABASE_USER = getenv('DATABASE_USER')
-DATABASE_PASS = getenv('DATABASE_PASS')
-DATABASE_PORT = getenv('DATABASE_PORT')
+NAME     = getenv('DATABASE_NAME')
+HOST     = getenv('DATABASE_HOST')
+USER     = getenv('DATABASE_USER')
+PORT     = getenv('DATABASE_PORT')
+PASSWORD = getenv('DATABASE_PASS')
 
-def get_connection():
-    connection = pc2.connect(
-        dbname=DATABASE_NAME,
-        host=DATABASE_HOST,
-        user=DATABASE_USER,
-        password=DATABASE_PASS,
-        port=DATABASE_PORT
-    )
-    return connection
+from typing import Any
+from datetime import datetime as dt
 
-def _execute_query(
-        query: str,
-        params: tuple = (),
-        fetch_one: bool = False
-    ) -> tuple | list[tuple]:
-    with get_connection() as conn:
-        try:
-            with conn.cursor() as cursor:
-                cursor.execute(query, params)
-                conn.commit()
-                result = cursor.fetchone() if fetch_one else cursor.fetchall()
-                return result
-        except Exception as exc:
-            print("Database error:", exc)
+import asyncio
+import asyncpg
+from asyncpg import Connection
+from asyncpg.pool import Pool
 
-#
-# Работа с пользователями
-#
+import db_models as models
+from specials import HashManager
 
-# Верификация пользователя по логину и паролю
-def verify_user(login: str, password: str) -> UserModel | None:
-    query = "SELECT id, username, login, password_hash, avatar_id FROM users WHERE login = %s"
-    result = _execute_query(query, (login,), fetch_one=True)
-    if result and HashManager.verify_key(password, result[3]):
-        user = UserModel(id=result[0], username=result[1], login=result[2], avatar_id=result[4])
-        return user
+class DataBaseClass:
+    def __init__(self):
+        self.pool: Pool | None = None
 
-def get_user_by_login(login: str) -> UserModel | None:
+    async def init_pool(self):
+        self.pool = await asyncpg.create_pool(
+            host=HOST,
+            port=PORT,
+            user=USER,
+            password=PASSWORD,
+            database=NAME,
+            min_size=1,
+            max_size=5,
+            command_timeout=60
+        )
+    async def fetch(self, query: str, *args) -> list[asyncpg.Record]:
+        # --------------------------------------------------------------------- Нужен логгер + проброска httpexception наверх
+        if self.pool is None:
+            print('Pool is None')
+            return
+        async with self.pool.acquire() as conn:
+            conn: Connection
+            try:
+                async with conn.transaction():
+                    return await conn.fetch(query, *args)
+            except asyncpg.PostgresError as e:
+                print(f'Error {e}')
+    async def fetchval(self, query: str, *args) -> asyncpg.Record | None:
+        # --------------------------------------------------------------------- Нужен логгер + проброска httpexception наверх
+        if self.pool is None:
+            print('Pool is None')
+            return
+        async with self.pool.acquire() as conn:
+            conn: Connection
+            try:
+                async with conn.transaction():
+                    return await conn.fetchval(query, *args)
+            except asyncpg.PostgresError as e:
+                print(f'Error {e}')
+    async def fetchrow(self, query: str, *args) -> Any:
+        # --------------------------------------------------------------------- Нужен логгер + проброска httpexception наверх
+        if self.pool is None:
+            print('Pool is None')
+            return
+        async with self.pool.acquire() as conn:
+            conn: Connection
+            try:
+                async with conn.transaction():
+                    return await conn.fetchrow(query, *args)
+            except asyncpg.PostgresError as e:
+                print(f'Error {e}')
+    async def execute(self, query: str, *args) -> str:
+        # --------------------------------------------------------------------- Нужен логгер + проброска httpexception наверх
+        if self.pool is None:
+            print('Pool is None')
+            return
+        async with self.pool.acquire() as conn:
+            conn: Connection
+            try:
+                async with conn.transaction():
+                    return await conn.execute(query, *args)
+            except asyncpg.PostgresError as e:
+                print(f'Error {e}')
+
+    async def close(self):
+        if self.pool:
+            await self.pool.close()
+
+class DataBaseError:
+    def __init__(self):
+        pass
+
+
+db = DataBaseClass()
+
+
+# USER
+async def verify_user(login: str, password: str) -> models.UserModel | None:
+    query = "SELECT id, username, login, password_hash, avatar_id " \
+            "FROM users " \
+            "WHERE login = $1"
+    result = await db.fetchrow(query, login)
+    print(result)
+    if result:
+        if HashManager.verify_key(password, result['password_hash']):
+            user_model = models.UserModel(**result)
+            return user_model # Standart response
+        else:
+            return # Verify error
+    else:
+        return # data errror
+
+async def get_user_by_login(login: str) -> models.UserModel | None:
     query = "SELECT id, username, login, avatar_id, status " \
             "FROM users " \
-            "WHERE login = %s"
-    result = _execute_query(query, (login,), fetch_one=True)
+            "WHERE login = $1"
+    result = await db.fetchrow(query, login)
     if result:
-        model = UserModel(
-            id=result[0],
-            username=result[1],
-            login=result[2],
-            avatar_id=result[3],
-            status=result[4]
-        )
-        return model
+        user_model = models.UserModel(**result)
+        return user_model
+    else:
+        return # data error
 
-def get_user_by_id(user_id: int) -> UserModel | None:
+async def get_user_by_id(user_id: int) -> models.UserModel | None:
     query = "SELECT id, username, login, avatar_id, status " \
             "FROM users " \
-            "WHERE id = %s"
-    result = _execute_query(query, (user_id,), fetch_one=True)
+            "WHERE id = $1"
+    result = await db.fetchrow(query, user_id)
     if result:
-        model = UserModel(
-            id=result[0],
-            username=result[1],
-            login=result[2],
-            avatar_id=result[3],
-            status=result[4]
-        )
-        return model
+        user_model = models.UserModel(**result)
+        return user_model
+    else:
+        return # data error
 
-#
-# Работа с медиа
-#
-def save_file(filename: str, filepath: str, user_id: int) -> int:
+
+# MEDIA
+async def save_file(filename: str, filepath: str, user_id: int) -> int:
     query = "INSERT INTO media (filename, path, user_id) " \
-            "VALUES (%s, %s, %s) " \
+            "VALUES ($1, $2, $3) " \
             "RETURNING id"
-    result = _execute_query(query, (filename, filepath, user_id), fetch_one=True)
+    result = await db.fetchval(query, filename, filepath, user_id)
     if result:
-        media_id = result[0]
+        #media_id = result['id']
+        media_id = result # Проверить
         return media_id
 
-def get_file(file_id: int, user_id: int) -> FileModel:
-    query = "SELECT * FROM media WHERE id = %s"
-    result = _execute_query(query, (file_id,), fetch_one=True)
+async def get_file(file_id: int, user_id: int) -> models.FileModel:
+    query = "SELECT * FROM media WHERE id = $1"
+    result = await db.fetchrow(query, file_id)
     if result:
-        if result[-1] != user_id:
+        if result['id'] != user_id:
             return 403
-        model = FileModel(*result)
+        model = models.FileModel(**result)
         return model
-#
-# Работа с чатами
-#
 
-def get_chats_by_user_id(user_id: int) -> list[ChatModel]:
+
+# CHATS
+async def get_chats_by_user_id(user_id: int) -> list[models.ChatModel]:
     query = """
         WITH user_chats AS (
             SELECT id, avatar_id, name, first_user_id, second_user_id
@@ -123,79 +173,71 @@ def get_chats_by_user_id(user_id: int) -> list[ChatModel]:
             (SELECT text FROM messages WHERE chat_id = chat.id ORDER BY id DESC LIMIT 1) AS last_message
         FROM user_chats chat
     """
-    results = _execute_query(query, (user_id, user_id))
-    return [
-        ChatModel(
-            id              = row[0],
-            avatar_id       = row[1],
-            name            = row[2],
-            first_user_id   = row[3],
-            second_user_id  = row[4],
-            last_msg_text   = row[5]
-        ) for row in results
-    ]
-
-def create_chat(chat_name: str, own_id: int, rec_id: int) -> ChatModel | tuple[int, str]:
-    # Проверка на существование чата
-    already_exists = _execute_query(
-        "SELECT id " \
-        "FROM chats " \
-        "WHERE "
-            "(first_user_id = %s AND second_user_id = %s) OR "
-            "(first_user_id = %s AND second_user_id = %s)",
-        (own_id, rec_id, rec_id, own_id),
-        fetch_one=True
-    )
-    if already_exists:
-        return (400, "Bad Request: Chat already exists")
-    # Создание чата
-    query = "INSERT INTO chats (name, first_user_id, second_user_id) " \
-            "VALUES (%s, %s, %s) " \
-            "RETURNING id"
-    result = _execute_query(query, (chat_name, own_id, rec_id), fetch_one=True)
+    result = await db.fetch(query, user_id, user_id)
     if result:
-        chat_id = result[0]
-        model = ChatModel(
-            id              = chat_id,
-            name            = chat_name,
-            first_user_id   = own_id,
-            second_user_id  = rec_id
+        return [models.ChatModel(**data) for data in result]
+    else:
+        return # chats not found
+
+
+##########################
+##########################
+##########################
+async def create_chat(chat_name: str, owner_id: int, reciever_id: int) -> models.ChatModel:
+#   # exists checking
+    exists_check_query = "SELECT id " \
+                         "FROM chats " \
+                         "WHERE " \
+                            "(first_user_id = $1 AND second_user_id = $2) OR " \
+                            "(first_user_id = $3 AND second_user_id = $4)"
+    result = await db.fetchval(exists_check_query, owner_id, reciever_id, reciever_id, owner_id)
+    if result:
+        error_message = (400, 'Bad Request: Chat already exists')
+        return error_message # 400
+    # create
+    insert_query = "INSERT INTO chats (name, first_user_id, second_user_id) " \
+                   "VALUES ($1, $2, $3) " \
+                   "RETURNING id"
+    chat_id = await db.fetchval(insert_query, chat_name, owner_id, reciever_id)
+    if chat_id:
+        model = models.ChatModel(
+            id=chat_id,
+            name=chat_name,
+            first_user_id=owner_id,
+            second_user_id=reciever_id
         )
         return model
 
-def send_message(chat_id: int, owner_id: int, text: str) -> MessageModel:
+async def send_message(chat_id: int, owner_id: int, text: str) -> models.MessageModel:
     query = "INSERT INTO messages (text, chat_id, owner_id) " \
-            "VALUES (%s, %s, %s) " \
+            "VALUES ($1, $2, $3) " \
             "RETURNING id"
-    result = _execute_query(query, (text, chat_id, owner_id), fetch_one=True)
-    if result:
-        message_id = result[0]
-        model = MessageModel(
-            id=message_id,
+    # ------------------------------------------------------------------------- Исправить
+    msg_id = await db.fetchval(query, text, chat_id, owner_id)
+    if msg_id:
+        model = models.MessageModel(
+            id=msg_id,
             text=text,
             chat_id=chat_id,
             owner_id=owner_id
-        )
+        ) 
         return model
+    # -------------------------------------------------------------------------
 
-def get_messages(chat_id: int, limit: int) -> list[MessageModel]:
+# ----------------------------------------------------------------------------- Добавить лимиты в SQL запрос
+async def get_messages(chat_id: int, limit: int) -> list[models.MessageModel]:
     query = "SELECT * " \
             "FROM messages " \
-            "WHERE chat_id = %s"
-    result = _execute_query(query, (chat_id,))
+            "WHERE chat_id = $1"
+    result = await db.fetch(query, chat_id)
     if result:
-        messages = result[:limit]
-        models = [
-            MessageModel(id=message[0], text=message[1], chat_id=message[2], owner_id=message[3])
-            for message in messages
-        ]
-        return models
+        messages = result[:limit] # Говнокод
+        msg_models = [models.MessageModel(**msg) for msg in messages]
+        return msg_models
+# -----------------------------------------------------------------------------
 
-#
-#
-# Базовая настройка
-
-def _create_tables():
+# STARTUP
+async def _create_tables():
     users = "CREATE TABLE IF NOT EXISTS users (" \
         "id             SERIAL  PRIMARY KEY," \
         "username       TEXT    NOT NULL," \
@@ -227,41 +269,33 @@ def _create_tables():
     media_alter = "ALTER TABLE media ADD COLUMN IF NOT EXISTS " \
         "user_id INT REFERENCES users(id) ON DELETE SET NULL"
 
-    conn = get_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute(media)
-            cursor.execute(users)
-            cursor.execute(media_alter)
-            cursor.execute(chats)
-            cursor.execute(messages)
-            cursor.execute(chats_last_message_column)
-            conn.commit()
-    finally:
-        conn.close()
+    query_list = [media, users, media_alter, chats, messages, chats_last_message_column]
+    for q in query_list:
+        result = await db.execute(q)
+        if result: print(result)
 
 # Добавление пользователя
-def _new_user(username: str, login: str, password_hash: str, avatar_id: int | None = None):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("INSERT INTO users (username, login, password_hash, avatar_id) VALUES (%s, %s, %s, %s)",
-                           (username, login, password_hash, avatar_id))
-            conn.commit()
-    finally:
-        conn.close()
+async def _new_user(login: str, username: str, password_hash: str, avatar_id: int | None = None):
+    query = "INSERT INTO users (username, login, password_hash, avatar_id) VALUES ($1, $2, $3, $4)"
+    result = await db.execute(query, username, login, password_hash, avatar_id)
 
-# Первый запуск
+async def main(hand_launch: bool = False):
+    await db.init_pool()
+    await _create_tables()
+    if hand_launch:
+        if input('reg? (y/n): ').lower() == 'y':
+            load_dotenv('access.env')
+            LOGINS     = getenv('LOGINS').split(' ')
+            USERNAMES  = getenv('USERNAMES').split(' ')
+            PASSWORDS  = getenv('PASSWORDS').split(' ')
+            for login, username, password in zip(LOGINS, USERNAMES, PASSWORDS):
+                password_hash = HashManager.hash_key(password)
+                await _new_user(login, username, password_hash)
+    # ------------------------------------------------------------------------- Проверка на существование таблиц
+    else:
+        pass
+    # -------------------------------------------------------------------------
+
+# Ручной запуск
 if __name__ == "__main__":
-    _create_tables()
-    if input("reg users? (y/n): ").lower() != 'n':
-        load_dotenv('access.env')
-        # Заранее определенные пользователи для удобства тестирования
-        USERNAMES = getenv('USERNAMES').split(' ')
-        LOGINS = getenv('LOGINS').split(' ')
-        PASSWORDS = getenv('PASSWORDS').split(' ')
-        # Регистрация пользователей из .env
-        for username, login, password in zip(USERNAMES, LOGINS, PASSWORDS):
-            password_hash = HashManager.hash_key(password)
-            _new_user(username, login, password_hash)
-        print("Success. (propably)")
+    asyncio.run(main(hand_launch=True))

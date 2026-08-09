@@ -23,8 +23,15 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse
 
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await db.db.init_pool()
+    yield
+
 # Для запуска сервера: uvicorn main:app --reload --port 8000
-app = FastAPI(title='fishmess-server')
+app = FastAPI(title='fishmess-server', lifespan=lifespan)
 # Обработчик WebSocket соединений
 class ClientsManager:
     def __init__(self):
@@ -94,7 +101,7 @@ class AccessManager:
             logging.info(f"Access authorization for {login} with access_token")
             return login
         except HTTPException as exc:
-            pass
+            raise exc
         except Exception as exc:
             logging.error("Critical authorization error", exc_info=True)
     
@@ -142,8 +149,7 @@ async def login(request: wmd.LoginRequest):
             status_code=400,
             detail="Bad Request"
         )
-    
-    user = db.verify_user(login, password)
+    user = await db.verify_user(login, password)
     if not user:
         raise HTTPException(
             status_code=401,
@@ -160,7 +166,7 @@ async def login(request: wmd.LoginRequest):
 async def get_current_user(authorization: str = Header(...)):
     login = access_manager.get_login(authorization)
 
-    user = db.get_user_by_login(login)
+    user = await db.get_user_by_login(login)
     if not user:
         raise HTTPException(
             status_code=404,
@@ -174,7 +180,7 @@ async def get_current_user(authorization: str = Header(...)):
 async def get_user_by_id(user_id: int, authorization: str = Header(...)):
     _login = access_manager.get_login(authorization)
     
-    user = db.get_user_by_id(user_id)
+    user = await db.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
@@ -185,14 +191,14 @@ async def get_user_by_id(user_id: int, authorization: str = Header(...)):
 async def get_chats(authorization: str = Header(...)):
     login = access_manager.get_login(authorization)
 
-    user = db.get_user_by_login(login)
+    user = await db.get_user_by_login(login)
     if not user:
         raise HTTPException(
             status_code=404,
             detail="User not found"
         )
     
-    chats = db.get_chats_by_user_id(user.id)
+    chats = await db.get_chats_by_user_id(user.id)
     response = {
         "chats_count": len(chats),
         "data": chats
@@ -210,10 +216,15 @@ async def post_chats(request: wmd.ChatsPostRequest, authorization: str = Header(
         raise HTTPException(status_code=400, detail="Bad Request")
     # Исключение создания чата с несуществующим пользователем
     # БД вызовет ошибку если нет одного из пользователей
-    own_id = db.get_user_by_login(login).id
-    rec_id = db.get_user_by_id(to_user_id).id
+    owner_user_model = await db.get_user_by_login(login)
+    owner_id = owner_user_model.id
+    reciever_user_model = await db.get_user_by_id(to_user_id)
+    reciever_id = reciever_user_model.id
 
-    chat_model = db.create_chat(chat_name, own_id, rec_id)
+    if not owner_id or not reciever_id:
+        print(f'Data error: owid - {owner_id} || rcid - {reciever_id}')
+
+    chat_model = await db.create_chat(chat_name, owner_id, reciever_id)
 
     if isinstance(chat_model, tuple):
         raise HTTPException(*chat_model)
@@ -231,11 +242,11 @@ async def post_message(chat_id: int, request: wmd.MessagesPostRequest, authoriza
     if not text:
         raise HTTPException(status_code=400, detail="Bad Request")
 
-    user = db.get_user_by_login(login)
+    user = await db.get_user_by_login(login)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    message_model = db.send_message(chat_id, user.id, text)
+    message_model = await db.send_message(chat_id, user.id, text)
     response = {"data": message_model}
     return response
 
@@ -244,11 +255,11 @@ async def post_message(chat_id: int, request: wmd.MessagesPostRequest, authoriza
 async def get_messages(chat_id: int, limit: int = 50, authorization: str = Header(...)):
     login = access_manager.get_login(authorization)
 
-    user = db.get_user_by_login(login)
+    user = await db.get_user_by_login(login)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    messages = db.get_messages(chat_id, limit)
+    messages = await db.get_messages(chat_id, limit)
     response = {
         "messages_count": len(messages),
         "data": messages
@@ -259,7 +270,7 @@ async def get_messages(chat_id: int, limit: int = 50, authorization: str = Heade
 @app.post("/file")
 async def post_file(file: UploadFile = File, authorization: str = Header(...)):
     login = access_manager.get_login(authorization)
-    user = db.get_user_by_login(login)
+    user = await db.get_user_by_login(login)
 
     if not file:
         raise HTTPException(status_code=400, detail="Bad Request")
@@ -267,16 +278,16 @@ async def post_file(file: UploadFile = File, authorization: str = Header(...)):
     result= file_manager.save(file)
     if result[0] == 201:
         _code, _info, _path = result 
-        file_id = db.save_file(file.filename, _path, user.id)
+        file_id = await db.save_file(file.filename, _path, user.id)
 
         return {"info": _info, "file_id": file_id}
 # Получение файла (клиент)
 @app.get("/file/{file_id}")
 async def get_file(file_id: int, authorization: str = Header(...)):
     login = access_manager.get_login(authorization)
-    user = db.get_user_by_login(login)
+    user = await db.get_user_by_login(login)
 
-    file_model = db.get_file(file_id, user.id)
+    file_model = await db.get_file(file_id, user.id)
     if file_model == 403:
         raise HTTPException(
             status_code=403,
