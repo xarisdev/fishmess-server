@@ -15,7 +15,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s"
 )
 
-from db_models import FileModel
+from data_models import FileModel
 
 class HashManager:
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

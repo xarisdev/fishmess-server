@@ -1,23 +1,13 @@
-from os import getenv
-from dotenv import load_dotenv
-
-load_dotenv('.env')
-
-NAME     = getenv('DATABASE_NAME')
-HOST     = getenv('DATABASE_HOST')
-USER     = getenv('DATABASE_USER')
-PORT     = getenv('DATABASE_PORT')
-PASSWORD = getenv('DATABASE_PASS')
-
-from typing import Any
-from datetime import datetime as dt
-
 import asyncio
 import asyncpg
 from asyncpg import Connection
 from asyncpg.pool import Pool
 
-import db_models as models
+from typing import Any
+
+from config import DATABASE_POOL_CREATE, DATABASE_USERS
+
+import data_models as models
 from specials import HashManager
 
 class DataBaseClass:
@@ -25,16 +15,8 @@ class DataBaseClass:
         self.pool: Pool | None = None
 
     async def init_pool(self):
-        self.pool = await asyncpg.create_pool(
-            host=HOST,
-            port=PORT,
-            user=USER,
-            password=PASSWORD,
-            database=NAME,
-            min_size=1,
-            max_size=5,
-            command_timeout=60
-        )
+        self.pool = await asyncpg.create_pool(**DATABASE_POOL_CREATE)
+
     async def fetch(self, query: str, *args) -> list[asyncpg.Record]:
         # --------------------------------------------------------------------- Нужен логгер + проброска httpexception наверх
         if self.pool is None:
@@ -284,11 +266,7 @@ async def main(hand_launch: bool = False):
     await _create_tables()
     if hand_launch:
         if input('reg? (y/n): ').lower() == 'y':
-            load_dotenv('access.env')
-            LOGINS     = getenv('LOGINS').split(' ')
-            USERNAMES  = getenv('USERNAMES').split(' ')
-            PASSWORDS  = getenv('PASSWORDS').split(' ')
-            for login, username, password in zip(LOGINS, USERNAMES, PASSWORDS):
+            for login, username, password in zip(*DATABASE_USERS):
                 password_hash = HashManager.hash_key(password)
                 await _new_user(login, username, password_hash)
     # ------------------------------------------------------------------------- Проверка на существование таблиц
