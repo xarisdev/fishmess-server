@@ -1,7 +1,4 @@
 __pycache__
 .venv
 *.env
-_.py
-api.md
 *.log
-files/
