@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from datetime import datetime
 
-from db_models import UserModel, ChatModel, MessageModel
+from data_models import UserModel, ChatModel, MessageModel
 
 # /auth/login
 class LoginRequest(BaseModel):
