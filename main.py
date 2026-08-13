@@ -1,37 +1,34 @@
 import asyncio
-import logging
-logging.basicConfig(
-    level=logging.INFO,
-    filename="server.log",
-    filemode="a", #"w"
-    format="%(asctime)s %(levelname)s %(message)s"
-)
+
+from typing import Annotated
+from datetime import datetime as dt
+
+from contextlib import asynccontextmanager
+
+from fastapi import (FastAPI, HTTPException, Request, status,
+                     Header, Depends, File,
+                     UploadFile,
+                     WebSocket, WebSocketDisconnect, WebSocketException)
+from fastapi.responses import FileResponse
 
 import db
 import web_models as wmd
 
-from datetime import datetime
-
-from typing import Annotated
+from logger import Path, setup_logger
 from specials import HashManager, FileManager
 
-from fastapi import (
-    FastAPI, HTTPException,
-    Request, Header, Depends, status,
-    File, UploadFile,
-    WebSocket, WebSocketDisconnect, WebSocketException
-)
-from fastapi.responses import FileResponse
-
-from contextlib import asynccontextmanager
+logger = setup_logger(Path(__file__).name)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await db.db.init_pool()
+    logger.info('Server startup')
+    await db.init_pool()
     yield
-
-# Для запуска сервера: uvicorn main:app --reload --port 8000
+    await db.close_pool()
+    logger.info('Server shutdown complete')
+# uvicorn main:app --reload --port 8000
 app = FastAPI(title='fishmess-server', lifespan=lifespan)
+
 # Обработчик WebSocket соединений
 class ClientsManager:
     def __init__(self):
@@ -48,22 +45,22 @@ class ClientsManager:
         async with self._lock:    
             ws = self._get_conn_by_login(login, True)
             if ws is not None:
-                logging.info(f"WebSocket connection for login: {login} already exists. Wait to close..")
+                logger.info(f"WebSocket connection for login: {login} already exists. Wait to close..")
                 await self.close_connection(ws)
             try:
                 await websocket.accept()
                 self.active_connections[login] = websocket
-                logging.info(f"Accept new WebSocket connection for login: {login}")
+                logger.info(f"Accept new WebSocket connection for login: {login}")
             except Exception as exc:
-                logging.error(f"Accept error WS for login: {login}", exc_info=exc)
+                logger.error(f"Accept error WS for login: {login}", exc_info=exc)
                 raise WebSocketException(code=status.WS_1014_BAD_GATEWAY)
 
     async def close_connection(self, websocket: WebSocket | None = None):
         try:
             await websocket.close()
-            logging.info(f"Succes close weboscket connection")
+            logger.info(f"Succes close weboscket connection")
         except Exception as exc:
-            logging.error(f"Can't close websocket connection", exc_info=exc)
+            logger.error(f"Can't close websocket connection", exc_info=exc)
             raise WebSocketException(code=status.WS_1011_INTERNAL_ERROR)
 
 # Хранилище сессий доступа
@@ -72,7 +69,7 @@ class AccessManager:
 
     def _extract_access_token(self, authorization: str) -> str:
         if not authorization:
-            logging.warning(f"Not found 'Authorization' header | Finding: {authorization}")
+            logger.warning(f"Not found 'Authorization' header | Finding: {authorization}")
             raise HTTPException(
                 status_code=401,
                 detail="Authorization header missing or invalid"
@@ -83,35 +80,35 @@ class AccessManager:
     def create_session(self, access_token: str, login: str):
         # Проверка на существование сессии
         if login in self.sessions.values():
-            logging.info(f"Active session found. Removing login: {login}")
+            logger.info(f"Active session found. Removing login: {login}")
             self._remove_session_by_login(login)
         self.sessions[access_token] = login
-        logging.info(f"NEW Session token created for login: {login}")
+        logger.info(f"NEW Session token created for login: {login}")
 
     def get_login(self, authorization: str) -> str:
         try:
             access_token = self._extract_access_token(authorization)
             login = self.sessions.get(access_token)
             if not login:
-                logging.info(f"Not found user for access_token")
+                logger.info(f"Not found user for access_token")
                 raise HTTPException(
                     status_code=401,
                     detail="Invalid access token"
                 )
-            logging.info(f"Access authorization for {login} with access_token")
+            logger.info(f"Access authorization for {login} with access_token")
             return login
         except HTTPException as exc:
             raise exc
         except Exception as exc:
-            logging.error("Critical authorization error", exc_info=True)
+            logger.error("Critical authorization error", exc_info=True)
     
     def _remove_session(self, access_token: str) -> str | None:
         login = self.sessions.pop(access_token, None)
         if login:
-            logging.info(f"Removed session for {login}")
+            logger.info(f"Removed session for {login}")
             return login
         else:
-            logging.info(f"Session not exists for access_token")
+            logger.info(f"Session not exists for access_token")
 
     def _remove_session_by_login(self, login: str):
         # Подрузамевается, что проверка на наличие логина уже выполнена до вызова. `login in sessions -> True`
@@ -119,10 +116,10 @@ class AccessManager:
         for k, v in self.sessions.items():
             if v == login:
                 _rmlogin = self.sessions.pop(k)
-                logging.info(f"Removed session for {login}")
+                logger.info(f"Removed session for {login}")
                 break
         if _rmlogin is None:
-            logging.info(f"Can't find {login} in `sessions`")
+            logger.info(f"Can't find {login} in `sessions`")
 
     def ws_depends(self, websocket: WebSocket, authorization: Annotated[str | None, Header(...)] = None):
         if authorization is None:
@@ -296,7 +293,7 @@ async def get_file(file_id: int, authorization: str = Header(...)):
                     "code": 403,
                     "message": "Forbidden",
                     "details": {},
-                    "timestamp": datetime.timestamp()
+                    "timestamp": dt.timestamp()
                 }
             }
         )
