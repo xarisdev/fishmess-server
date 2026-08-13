@@ -7,13 +7,13 @@ from fastapi.responses import FileResponse
 from secrets import token_urlsafe
 from passlib.context import CryptContext
 
-import logging
+"""import logging
 logging.basicConfig(
     level=logging.INFO,
     filename="managers.log",
     filemode="a",
     format="%(asctime)s %(levelname)s %(message)s"
-)
+)"""
 
 from data_models import FileModel
 
@@ -43,16 +43,16 @@ class FileManager:
 
     def _404(self, path: str):
         error = 404, f"Path: {path} not exists"
-        logging.error(error[1])
+        #logging.error(error[1])
         return error
     
     def _201(self, detail: str):
         info = 201, f"Created: {detail}"
-        logging.info(info[1])
+        #logging.info(info[1])
         return info
 
     def save(self, file: UploadFile):
-        logging.info(f"Saving file: {file.filename}")
+        #logging.info(f"Saving file: {file.filename}")
         
         filename = file.filename
         _path = os.path.join(self.main_path, filename)
@@ -63,7 +63,7 @@ class FileManager:
             return self._201(filename) + (_path)
         
     def load(self, file: FileModel) -> FileResponse:
-        logging.info(f"Search file {file.filename} for load")
+        #logging.info(f"Search file {file.filename} for load")
         
         if not os.path.exists(file.filepath):
             return self._404(file.filepath)

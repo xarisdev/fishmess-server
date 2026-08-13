@@ -1,9 +1,11 @@
 import logging
 from pathlib import Path
 
+DEBUG = True
+
 LOG_DIR = Path('logs')
 LOG_FILE = LOG_DIR / 'log.log'
-LOG_LEVEL = logging.INFO
+LOG_LEVEL = logging.DEBUG if DEBUG else logging.INFO
 
 def setup_logger(module_name: str):
     logger = logging.getLogger(module_name)
