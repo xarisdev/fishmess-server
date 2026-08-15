@@ -7,13 +7,9 @@ from fastapi.responses import FileResponse
 from secrets import token_urlsafe
 from passlib.context import CryptContext
 
-"""import logging
-logging.basicConfig(
-    level=logging.INFO,
-    filename="managers.log",
-    filemode="a",
-    format="%(asctime)s %(levelname)s %(message)s"
-)"""
+from logger import Path, setup_logger
+
+logger = setup_logger(Path(__file__).name)
 
 from data_models import FileModel
 
