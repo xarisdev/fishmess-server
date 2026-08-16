@@ -21,10 +21,12 @@ class UserNotVerifiedError(Exception): ...
 class UserNotFoundError(Exception): ...
 
 class ChatAlreadyExistsError(Exception): ...
+class ChatNotFoundError(Exception): ...
 class ChatCreateError(Exception): ...
 
 class NetworkError(Exception): ...
 class BadDataError(Exception): ...
+class ForbiddenError(Exception): ...
 
 def handle_db_errors(func: Callable) -> Callable:
     @functools.wraps(func)
@@ -277,6 +279,25 @@ async def create_chat(chat_name: str, owner_id: int, reciever_id: int) -> models
     logger.info(f'Chat: {chat_name}, created for ({owner_id}, {reciever_id})')
 
     return model
+
+async def get_chat_by_id(chat_id: int, user_id: int) -> models.ChatModel:
+    logger.info(f'Search chat with id: {chat_id}, request from user_id: {user_id}')
+    query = ("SELECT * "
+             "FROM chats "
+             "WHERE id = $1")
+    result = await client.fetchrow(query, chat_id)
+    if not result:
+        logger.error(f'Chat [{chat_id}] not found')
+        raise ChatNotFoundError('Chat not found')
+
+    chat = models.ChatModel(**result)
+    if chat.first_user_id != user_id and chat.second_user_id != user_id:
+        logger.error(f'User [{user_id}] not authorized for chat [{chat_id}]')
+        raise ForbiddenError('Forbidden')
+
+    logger.info(f'User [{user_id}] got chat [{chat_id}]')
+
+    return chat
 
 # MESSAGES
 async def send_message(chat_id: int, owner_id: int, text: str) -> models.MessageModel:
