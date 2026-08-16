@@ -25,45 +25,12 @@ async def lifespan(app: FastAPI):
     logger.info('Server startup')
     await db.init_pool()
     yield
+    await websockets_manager.shutdown()
     await db.close_pool()
     logger.info('Server shutdown complete')
 
 # uvicorn main:app --reload --port 8000
 app = FastAPI(title='fishmess-server', lifespan=lifespan)
-
-"""# Обработчик WebSocket соединений
-class ClientsManager:
-    def __init__(self):
-        self._lock = asyncio.Lock()
-
-        self.active_connections: dict[str, WebSocket] = {}
-
-    def _get_conn_by_login(self, login: str, rm: bool = False) -> WebSocket | None:
-        if rm: websocket = self.active_connections.pop(login, None)
-        else: websocket = self.active_connections.get(login)
-        return websocket
-
-    async def connect(self, websocket: WebSocket, login: str):
-        async with self._lock:    
-            ws = self._get_conn_by_login(login, True)
-            if ws is not None:
-                logger.info(f"WebSocket connection for login: {login} already exists. Wait to close..")
-                await self.close_connection(ws)
-            try:
-                await websocket.accept()
-                self.active_connections[login] = websocket
-                logger.info(f"Accept new WebSocket connection for login: {login}")
-            except Exception as exc:
-                logger.error(f"Accept error WS for login: {login}", exc_info=exc)
-                raise WebSocketException(code=status.WS_1014_BAD_GATEWAY)
-
-    async def close_connection(self, websocket: WebSocket | None = None):
-        try:
-            await websocket.close()
-            logger.info(f"Succes close weboscket connection")
-        except Exception as exc:
-            logger.error(f"Can't close websocket connection", exc_info=exc)
-            raise WebSocketException(code=status.WS_1011_INTERNAL_ERROR)"""
 
 # Хранилище сессий доступа
 class AccessManager:
@@ -107,13 +74,17 @@ class AccessManager:
         self.sessions[new_token] = old_session
         logger.info(f'Session refreshed {old_token[:5]}... -> {new_token[:5]}...')
 
-    def create_session(self, access_token: str, login: str):
+    def create_session(self, access_token: str, user: db.models.UserModel):
         # Проверка на существование сессии
+        login = user.login
+        user_id = user.id
+        
         if access_token in self.sessions:
             logger.info(f"Shutdown session for login: {login}")
             self.shutdown_session(access_token)
 
         self.sessions[access_token] = {'login': login,
+                                       'user_id': user_id,
                                        'is_active': True,
                                        'expired_at': self.set_expired_at()}
         logger.info(f"New session for login: {login}")
@@ -146,14 +117,118 @@ class AccessManager:
         else:
             logger.warning(f'Session {access_token[:5]}... not exists')
 
-#    def ws_depends(self, websocket: WebSocket, authorization: Annotated[str | None, Header(...)] = None):
-#        if authorization is None:
-#            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
-#        login = self.get_login(authorization)
-#        return login
+    def ws_user_id(self,
+                   websocket: WebSocket,
+                   authorization: Annotated[str | None, Header(...)] = None) -> int:
+        
+        if authorization is None:
+            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION,
+                                     reason='Missing Authorization header')
+
+        session = self.get_session(authorization)[1]
+        user_id = session.get('user_id')
+
+        return user_id
+
+class WebSocketsManager:
+    connections: dict[int, WebSocket] = {}
+    notifications_wait_list: dict[int, list[dict]] = {}
+
+    def get_utc_time(self) -> datetime:
+        return datetime.now(timezone.utc)
+
+    def notification_expired(self, time: datetime) -> bool:
+        diff = self.get_utc_time() - time
+        return diff.days >= 7
+
+    async def connect(self, websocket: WebSocket, user_id: int):
+        logger.info(f'--ws Connecting user_id: {user_id}')
+        try: # Проверка на существование и активность соединения (поддержка 1 коннекта)
+            conn = self.connections.get(user_id)
+            conn.send_text('--ws-ping')
+        except AttributeError:
+            pass
+        except WebSocketDisconnect as exc:
+            logger.info(f'--ws Removed closed duplicate')
+            del self.connections[user_id]
+
+        self.connections[user_id] = websocket
+        await websocket.accept()
+
+        await websocket.send_text(f'WS://Connected to user_id: {user_id}')
+
+        if user_id in self.notifications_wait_list:
+            logger.info(f'--ws [{user_id}] Released wait list..')
+            nlist = self.notifications_wait_list.get(user_id)
+            await self.release_notifications(user_id, nlist)
+
+    async def disconnect(self, websocket: WebSocket, user_id: int):
+        logger.info(f'--ws Disconnecting user_id: {user_id}')
+        try:
+            await websocket.close()
+            del self.connections[user_id]
+        except KeyError:
+            pass
+        except Exception as exc:
+            logger.error('--ws Unexpected error while disconnect', exc_info=exc)
+            return
+        logger.info(f'--ws User [{user_id}] disconnected')
+
+    async def shutdown(self):
+        logger.info('--ws Shutdown connections..')
+        for user_id, connection in self.connections.items():
+            logger.debug(f'--ws Shutdown {user_id}..')
+            await connection.close(reason='Server shutdown')
+        self.connections.clear()
+        logger.info('--ws Shutdown complete')
+
+    async def send_notification(self, reciever_id: int, send_type: str, message: str = '', details: Any = None):
+        reciever = self.connections.get(reciever_id)
+
+        json_data = {
+            'datetime_utc': self.get_utc_time().isoformat(),
+            'type': send_type,
+            'data': {
+                'message': message,
+                'details': details
+            }
+        }
+
+        try:
+            await reciever.send_json(data=json_data)
+            logger.info(f'--ws Send notification to user: {reciever_id}')
+            return
+        except AttributeError as exc:
+            pass
+        except WebSocketDisconnect as exc:
+            logger.error(f'--ws connection closed')
+
+        nlist = self.notifications_wait_list.get(reciever_id)
+        nlist = nlist if nlist else []
+        nlist.append(json_data)
+        self.notifications_wait_list[reciever_id] = nlist
+        logger.info('--ws Add notification to wait list')
+
+    async def release_notifications(self, user_id: int, nlist: list[dict[str, Any]]):
+        reciever = self.connections.get(user_id)
+        if not reciever:
+            logger.error('No connection to reciever')
+            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION,
+                                     reason='No connection to reciever')
+        
+        for n in nlist:
+            ntime = n.get('datetime_utc')
+            if self.notification_expired(datetime.fromisoformat(ntime)):
+                logger.info(f'Notification ({ntime}) expired')
+                continue
+
+            await reciever.send_json(data=n)
+
+        self.notifications_wait_list.pop(user_id, None)
 
 access_manager = AccessManager() # Временное хранилище сессий доступа
-#clients_manager = ClientsManager() # Временное хранилище websocket клиентов
+websockets_manager = WebSocketsManager()
+
 #file_manager = FileManager() # Работа с файлами
 
 # Обработчики ошибок БД
@@ -162,28 +237,40 @@ access_manager = AccessManager() # Временное хранилище сес�
 async def bad_data_error(request, exc):
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-@app.exception_handler(db.NetworkError)
-@app.exception_handler(db.PoolNotInitializedError)
-async def network_error_handler(request, exc):
-    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
-
-@app.exception_handler(db.UserNotFoundError)
-async def user_not_found_error_handler(request, exc):
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-
 @app.exception_handler(db.UserNotVerifiedError)
 async def user_not_verified_error(request, exc):
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
+
+@app.exception_handler(db.ForbiddenError)
+async def forbidden_error(request, exc):
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+
+@app.exception_handler(db.UserNotFoundError)
+@app.exception_handler(db.ChatNotFoundError)
+async def user_not_found_error_handler(request, exc):
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
 @app.exception_handler(db.ChatAlreadyExistsError)
 async def chat_already_exists_error(request, exc):
     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
+@app.exception_handler(db.NetworkError)
+@app.exception_handler(db.PoolNotInitializedError)
+async def network_error_handler(request, exc):
+    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+
+
 # вебсок
-#@app.websocket("/ws/pp")
-#async def websocket_endpoint(websocket: WebSocket, login: Annotated[str, Depends(access_manager.ws_depends)]):
-#    await clients_manager.connect(websocket, login)
-#    websocket.send_text("ping <-> pong")
+@app.websocket("/ws/notifications")
+async def ws_notifications(websocket: WebSocket, user_id: Annotated[int, Depends(access_manager.ws_user_id)]):
+    await websockets_manager.connect(websocket, user_id)
+
+    try: # переписать мб, мне не нрав
+        await asyncio.Future()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await websockets_manager.disconnect(websocket, user_id)
 
 # Роуты
 # Обновление токена
@@ -208,10 +295,10 @@ async def login(request: wmd.LoginRequest):
             detail="Bad Request"
         )
 
-    user = await db.verify_user(login, password) # --- Удалить возврат
+    user = await db.verify_user(login, password)
     
     access_token = HashManager.generate_token()
-    access_manager.create_session(access_token, login)
+    access_manager.create_session(access_token, user)
     
     response = wmd.LoginResponse(access_token=access_token)
     return response
@@ -285,6 +372,16 @@ async def post_message(chat_id: int, request: wmd.MessagesPostRequest, authoriza
     user = await db.get_user_by_login(session.get('login'))
     
     message_model = await db.send_message(chat_id, user.id, text)
+    # Уведомление второй стороны о сообщении
+    # Подумать как хочу это видеть в будущем и не забываем про права доступа в БД (вписаны)
+    chat_model = await db.get_chat_by_id(message_model.chat_id, user.id)
+    users_id = [chat_model.first_user_id, chat_model.second_user_id]
+    for uid in users_id:
+        if uid == user.id:
+            continue
+        await websockets_manager.send_notification(reciever_id=uid,
+                                             send_type='chat',
+                                             details=message_model.model_dump())
 
     response = wmd.MessagesPostResponse(data=message_model)
     return response
