@@ -306,8 +306,9 @@ async def login(request: wmd.LoginRequest):
 @app.get("/users/me", response_model=wmd.UserResponse)
 async def get_current_user(authorization: str = Header(...)):
     _, session = access_manager.get_session(authorization)
+    user_id = session.get('user_id')
 
-    user = await db.get_user_by_login(session.get('login'))
+    user = await db.get_user_by_id(user_id)
 
     response = wmd.UserResponse(data=user)
     return response
@@ -324,11 +325,9 @@ async def get_user_by_id(user_id: int, authorization: str = Header(...)):
 @app.get("/chats", response_model=wmd.ChatsGetResponse)
 async def get_chats(authorization: str = Header(...)):
     _, session = access_manager.get_session(authorization)
+    user_id = session.get('user_id')
 
-    user = await db.get_user_by_login(session.get('login'))
-    
-    chats = await db.get_chats_by_user_id(user.id)
-    # ?...
+    chats = await db.get_chats_by_user_id(user_id)
 
     response = wmd.ChatsGetResponse(chats_count=len(chats), data=chats)
     return response
@@ -336,6 +335,7 @@ async def get_chats(authorization: str = Header(...)):
 @app.post("/chats", response_model=wmd.ChatsPostResponse)
 async def post_chats(request: wmd.ChatsPostRequest, authorization: str = Header(...)):
     _, session = access_manager.get_session(authorization)
+    user_id = session.get('user_id')
 
     chat_name = request.name
     to_user_id = request.to_user_id
@@ -343,19 +343,9 @@ async def post_chats(request: wmd.ChatsPostRequest, authorization: str = Header(
     if not chat_name or not to_user_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Bad Request")
-    # Исключение создания чата с несуществующим пользователем (внедрить в БД)
-    # БД вызовет ошибку если нет одного из пользователей
-    ## ------------------------------------------------------------------------
-    owner_user_model = await db.get_user_by_login(session.get('login')) # Тот кто создает
-    owner_id = owner_user_model.id
-    reciever_user_model = await db.get_user_by_id(to_user_id) # Второй участник
-    reciever_id = reciever_user_model.id
 
-    if not owner_id or not reciever_id: # Вынести излишки* логики в db.create_chat
-        print(f'Data error: owid - {owner_id} || rcid - {reciever_id}')
+    chat_model = await db.create_chat(chat_name, user_id, to_user_id)
 
-    chat_model = await db.create_chat(chat_name, owner_id, reciever_id)
-    ## ------------------------------------------------------------------------
     response = wmd.ChatsPostResponse(data=chat_model)
     return response
 
@@ -363,13 +353,14 @@ async def post_chats(request: wmd.ChatsPostRequest, authorization: str = Header(
 @app.post("/chats/{chat_id}/messages", response_model=wmd.MessagesPostResponse)
 async def post_message(chat_id: int, request: wmd.MessagesPostRequest, authorization: str = Header(...)):
     _, session = access_manager.get_session(authorization)
+    user_id = session.get('user_id')
 
     text = request.text
     if not text:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Bad Request")
 
-    user = await db.get_user_by_login(session.get('login'))
+    user = await db.get_user_by_id(user_id)
     
     message_model = await db.send_message(chat_id, user.id, text)
     # Уведомление второй стороны о сообщении
@@ -380,8 +371,8 @@ async def post_message(chat_id: int, request: wmd.MessagesPostRequest, authoriza
         if uid == user.id:
             continue
         await websockets_manager.send_notification(reciever_id=uid,
-                                             send_type='chat',
-                                             details=message_model.model_dump())
+                                                   send_type='chat',
+                                                   details=message_model.model_dump())
 
     response = wmd.MessagesPostResponse(data=message_model)
     return response
@@ -390,10 +381,9 @@ async def post_message(chat_id: int, request: wmd.MessagesPostRequest, authoriza
 @app.get("/chats/{chat_id}/messages", response_model=wmd.MessagesGetResponse)
 async def get_messages(chat_id: int, limit: int = 50, authorization: str = Header(...)):
     _, session = access_manager.get_session(authorization)
-
-    user = await db.get_user_by_login(session.get('login')) # --- Удалить возврат
+    user_id = session.get('user_id')
     
-    messages = await db.get_messages(chat_id, limit)
+    messages = await db.get_messages(user_id, chat_id, limit)
 
     response = wmd.MessagesGetResponse(messages_count=len(messages),
                                        data=messages)

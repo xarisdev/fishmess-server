@@ -299,9 +299,28 @@ async def get_chat_by_id(chat_id: int, user_id: int) -> models.ChatModel:
 
     return chat
 
+async def user_to_chat_permission_check(user_id: int, chat_id: int):
+    chat_permission_query = ("SELECT first_user_id, second_user_id "
+                             "FROM chats "
+                             "WHERE id = $1")
+        
+    result = await client.fetchrow(chat_permission_query, chat_id)
+    if not result:
+        error = f"Chat: {chat_id}, don't exists"
+        logger.error(error)
+        raise ChatNotFoundError(error)
+
+    members_id = [result['first_user_id'], result['second_user_id']]
+    if user_id not in members_id:
+        logger.info(f'User: {user_id} has no permission to chat: {chat_id}')
+        raise ForbiddenError('Forbidden')
+
 # MESSAGES
 async def send_message(chat_id: int, owner_id: int, text: str) -> models.MessageModel:
     logger.info(f'Insert message in chat: {chat_id}, from user: {owner_id}')
+    # Проверка на доступ к чату
+    await user_to_chat_permission_check(user_id=owner_id, chat_id=chat_id)
+    # Вставка сообщения
     query = ("INSERT INTO messages (text, chat_id, owner_id) "
             "VALUES ($1, $2, $3) "
             "RETURNING id")
@@ -321,8 +340,11 @@ async def send_message(chat_id: int, owner_id: int, text: str) -> models.Message
         owner_id=owner_id
     )
 
-async def get_messages(chat_id: int, limit: int) -> list[models.MessageModel]:
-    logger.info(f'Get last {limit} messages from chat [{chat_id}]')
+async def get_messages(user_id: int, chat_id: int, limit: int) -> list[models.MessageModel]:
+    logger.info(f'Request from user: {user_id}, select last {limit} messages from chat [{chat_id}]')
+    # Проверка доступа к чату
+    await user_to_chat_permission_check(user_id=user_id, chat_id=chat_id)
+    # Выборка сообщений
     query = ("SELECT * "
             "FROM messages "
             "WHERE chat_id = $1 "
