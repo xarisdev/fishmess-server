@@ -16,12 +16,14 @@ pip install -r requirements.txt
 
 cp .env.example .env # Заполнить заглушку SECRET_KEY
 
-`uvicorn src.core.main:app --reload --port 8000`
+uvicorn src.core.main:app --reload --port 8000
 ```
 
-Сервер: `http://localhost:8000`
-Swagger UI: `http://localhost:8000/docs`
-OpenAPI JSON: `http://localhost:8000/openapi.json`
+Сервер: http://localhost:8000
+
+Swagger UI: http://localhost:8000/docs
+
+OpenAPI JSON: http://localhost:8000/openapi.json
 
 ## Переменные окружения (.env)
 ```
